@@ -46,30 +46,49 @@
   </select>
 
   <div class="form-group">
-
-    <!-- Delivery Address -->
-    <label for="delivery">Deliver To</label>
+    <!-- Delivery Address (Controlled List Only) -->
+    <label for="delivery_address_id">Deliver To</label>
     <select name="delivery_address_id" id="delivery_address_id" onchange="filterContacts()">
-      <option value="">-- Select Address --</option>
-      {% for address in delivery_addresses %}
-        <option value="{{ address.id }}" 
-                {% if po and po.delivery_address_id == address.id %}selected{% endif %}>
-          {{ address.name }}
-        </option>
-      {% endfor %}
+        <option value="">-- Select Address --</option>
+        {% for address in delivery_addresses %}
+            <option value="{{ address.id }}" 
+                    {% if po_data.get('delivery_address_id') == address.id %}selected{% endif %}>
+                {{ address.name }}
+            </option>
+        {% endfor %}
     </select>
 
+    <!-- Delivery Contact (with Manual Option) -->
     <label for="delivery_contact_id">Delivery Contact</label>
-    <select name="delivery_contact_id" id="delivery_contact_id" {% if not po %}disabled{% endif %}>
-      <option value="">-- Select Contact --</option>
-      {% for contact in delivery_contacts %}
-        <option value="{{ contact.id }}" 
-                data-address-id="{{ contact.address_id }}"
-                {% if po and po.delivery_contact_id == contact.id %}selected{% endif %}>
-          {{ contact.name }}
-        </option>
-      {% endfor %}
+    <select name="delivery_contact_id" id="delivery_contact_id" onchange="toggleManualContact()">
+        <option value="">-- Select Contact --</option>
+        {% for contact in delivery_contacts %}
+            <option value="{{ contact.id }}" 
+                    data-address-id="{{ contact.address_id }}"
+                    {% if po_data.get('delivery_contact_id') == contact.id %}selected{% endif %}>
+                {{ contact.name }}
+            </option>
+        {% endfor %}
+        <option value="manual">⌨️ Enter Manual Contact</option>
     </select>
+
+    <!-- Manual Contact Inputs (hidden by default) -->
+    <div id="manual_contact_container" style="display: none; margin-top: 10px;">
+        <label for="manual_contact_name">Contact Name</label>
+        <input type="text" name="manual_contact_name" id="manual_contact_name" 
+               placeholder="Contact name..." 
+               value="{{ po_data.get('manual_contact_name', '') }}">
+        
+        <label for="manual_contact_phone">Contact Phone</label>
+        <input type="tel" name="manual_contact_phone" id="manual_contact_phone" 
+               placeholder="Phone number..." 
+               value="{{ po_data.get('manual_contact_phone', '') }}">
+        
+        <label for="manual_contact_email">Contact Email</label>
+        <input type="email" name="manual_contact_email" id="manual_contact_email" 
+               placeholder="Email address..." 
+               value="{{ po_data.get('manual_contact_email', '') }}">
+    </div>
   </div>
 
   <!-- Delivery Terms -->
@@ -140,40 +159,78 @@ function removeLineItem(button) {
   button.parentElement.remove();
 }
 
-// Delivery address → contact filtering
-function filterContacts() {
-  const selectedAddressId = document.getElementById('delivery_address_id').value;
-  const contactSelect = document.getElementById('delivery_contact_id');
-  const options = contactSelect.options;
-
-  contactSelect.disabled = !selectedAddressId;
-
-  for (let i = 0; i < options.length; i++) {
-    const option = options[i];
-    const optionAddressId = option.getAttribute('data-address-id');
-
-    if (i === 0) {
-      option.hidden = false; // Always keep the placeholder
-      continue;
-    }
-
-    // Keep selected contact visible even if mismatched (for edit mode)
-    if (optionAddressId === selectedAddressId || option.selected) {
-      option.hidden = false;
+// Toggle manual contact input
+function toggleManualContact() {
+    const contactSelect = document.getElementById('delivery_contact_id');
+    const manualContainer = document.getElementById('manual_contact_container');
+    const nameInput = document.getElementById('manual_contact_name');
+    
+    if (contactSelect.value === 'manual') {
+        manualContainer.style.display = 'block';
+        nameInput.required = true;
     } else {
-      option.hidden = true;
+        manualContainer.style.display = 'none';
+        nameInput.required = false;
     }
-  }
-
-  // Reset the selection unless already valid
-  if (!contactSelect.querySelector('option:checked')?.hasAttribute('data-address-id') ||
-      contactSelect.querySelector('option:checked')?.getAttribute('data-address-id') !== selectedAddressId) {
-    contactSelect.value = '';
-  }
 }
 
+// Delivery address → contact filtering
+function filterContacts() {
+    const selectedAddressId = document.getElementById('delivery_address_id').value;
+    const contactSelect = document.getElementById('delivery_contact_id');
+    const options = contactSelect.options;
+
+    // Enable/disable contact dropdown based on address selection
+    contactSelect.disabled = !selectedAddressId;
+
+    // Track if current selection is still valid
+    let currentSelectionValid = false;
+    const currentValue = contactSelect.value;
+
+    for (let i = 0; i < options.length; i++) {
+        const option = options[i];
+        const optionAddressId = option.getAttribute('data-address-id');
+
+        if (i === 0 || option.value === 'manual') {
+            // Always keep the placeholder and manual option visible
+            option.hidden = false;
+            continue;
+        }
+
+        if (optionAddressId === selectedAddressId) {
+            option.hidden = false;
+            // Check if current selection is still valid
+            if (option.value === currentValue) {
+                currentSelectionValid = true;
+            }
+        } else {
+            option.hidden = true;
+        }
+    }
+
+    // Reset selection if current selection is no longer valid
+    if (!currentSelectionValid && currentValue !== '' && currentValue !== 'manual') {
+        contactSelect.value = '';
+    }
+}
+
+// Initialize on page load
 window.addEventListener("DOMContentLoaded", function () {
-  filterContacts();  // Pre-filter contacts on page load if editing
+    // Handle existing manual contact data on edit
+    const contactSelect = document.getElementById('delivery_contact_id');
+    const manualContactName = document.getElementById('manual_contact_name').value.trim();
+    
+    // If we have manual contact data but no selected contact, show manual input
+    if (manualContactName && !contactSelect.value) {
+        contactSelect.value = 'manual';
+        toggleManualContact();
+    }
+    
+    // Set up initial filtering
+    filterContacts();
+    
+    // Initialize manual contact input visibility
+    toggleManualContact();
 });
 </script>
 
