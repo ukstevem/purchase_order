@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}PO List{% endblock %}
+
+{% block content %}
+  <a href="{{ url_for('main.create_po') }}" class="btn">Create New PO</a>
+
+  <form method="get" style="margin: 1em 0;">
+    <label>
+      Filter by Project Number:
+      <input type="text" name="projectnumber" value="{{ projectnumber or '' }}">
+    </label>
+    <button type="submit">Apply</button>
+    <a href="{{ url_for('main.po_list') }}">Clear</a>
+  </form>
+
+<!-- This table uses a view 'active_po_list' created by/in supabase -->
+
+  <table>
+    <thead>
+      <tr>
+        <th>PO Number</th>
+        <th>Project</th>
+        <th>Supplier</th>
+        <th>Status</th>
+        <th>Revision</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for po in pos %}
+      <tr>
+        <td>{{ "%06d"|format(po["po_number"]) }}</td>
+        <td>{{ po.projectnumber }}</td>
+        <td>{{ po.supplier_name }}</td>
+        <td>
+          <span class="status-tag status-{{ po.status }}">
+            {{ po.status | capitalize }}
+          </span>
+        </td>
+        <td>{{ po.current_revision }}</td>
+        <td>
+          <a href="{{ url_for('main.po_preview', po_id=po.purchase_order_id) }}">View PO</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

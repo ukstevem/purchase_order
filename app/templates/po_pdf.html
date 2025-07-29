@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}PO PDF Preview{% endblock %}
+{% block content %}
+
+{% if po and po.get('id') %}
+
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1em;">
+    {% if logo_base64 %}
+      <img src="data:image/png;base64,{{ logo_base64 }}" alt="Logo" style="height: 150px;">
+    {% else %}
+      <img src="{{ url_for('static', filename='img/PSS_Standard_RGB.png') }}" alt="Logo" style="height: 150px;">
+    {% endif %}
+
+    <div style="text-align: right;">
+      <h2 style="margin: 0;">Purchase Order</h2>
+      <p style="margin: 0;"><strong>PO Number:</strong> {{ "%06d"|format(po['po_number']) }}-{{ po['projects'].get('projectnumber', '') }}</p>
+      <p style="margin: 0;"><strong>PO Date:</strong> {{ now.strftime('%d %b %Y') }}</p>
+      <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>
+    </div>
+  </div>
+
+  <hr style="margin: 1em 0;">
+
+  <div style="display: flex; justify-content: space-between; margin-top: 1em; gap: 2em;">
+    <div style="flex: 1;">
+      <p style="margin: 0;"><strong>Supplier:</strong><br>
+      {% if po.get('suppliers') %}
+        {{ po['suppliers'].get('name', '') }}<br>
+        {{ po['suppliers'].get('address_line1', '') }}<br>
+        {{ po['suppliers'].get('address_line2', '') }}<br>
+        {{ po['suppliers'].get('postcode', '') }}
+      {% else %}
+        —
+      {% endif %}
+      </p>
+    </div>
+
+    <div style="flex: 1; text-align: right;">
+      <p style="margin: 0;"><strong>Delivery Address:</strong><br>
+      {% if po.get('manual_delivery_address') %}
+        <pre style="text-align: left;">{{ po.manual_delivery_address }}</pre>
+      {% elif po.get('delivery_address') %}
+        {{ po.delivery_contact.name }}<br>
+        {{ po.delivery_contact.phone }}<br>
+        {{ po.delivery_address.name }}<br>
+        {{ po.delivery_address.address_line1 }}<br>
+        {{ po.delivery_address.address_line2 }}<br>
+        {{ po.delivery_address.postcode }}
+      {% else %}
+        —
+      {% endif %}
+      </p>
+
+      {% if delivery_contact %}
+        <p style="margin: 0.5em 0 0 0;"><strong>Contact:</strong> {{ delivery_contact.name }}<br>
+        <strong>Phone:</strong> {{ delivery_contact.phone }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <hr>
+  <h3>Line Items</h3>
+
+  {% if po.get('line_items') %}
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th>Qty</th>
+          <th>UOM</th>
+          <th style="text-align: right;">Unit Price</th>
+          <th style="text-align: right;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in po['line_items'] %}
+        <tr>
+          <td>{{ item.get('description') }}</td>
+          <td>{{ item.get('quantity') }}</td>
+          <td>{{ item.get('unit') }}</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(item.unit_price) }}</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(item.total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" style="text-align: right; font-weight: bold;">Net Total</td>
+          <td style="text-align: right; font-weight: bold;">£{{ "{:,.2f}".format(net_total) }}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align: right;">VAT</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(vat_total) }}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align: right; font-weight: bold;">Grand Total</td>
+          <td style="text-align: right; font-weight: bolder;">£{{ "{:,.2f}".format(grand_total) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="footer-left">Power System Services</div>
+    <div class="footer-center">
+    Page <span class="page-number"></span> of <span class="total-pages"></span>
+    </div>
+    <div class="footer-right">PO #{{ '%06d' % po['po_number'] }}</div>
+
+
+  {% else %}
+    <p>No line items available.</p>
+  {% endif %}
+
+{% else %}
+  <p>PO not found.</p>
+{% endif %}
+
+{% endblock %}

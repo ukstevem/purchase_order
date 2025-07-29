@@ -1,0 +1,11 @@
+
+{% extends "base.html" %}
+{% block title %}404 - Not Found{% endblock %}
+{% block content %}
+<h2>🚫 404 - Not Found</h2>
+<p>Sorry, the page you're looking for doesn't exist or the PO was not found.</p>
+<p>It could have been deleted, check with Lee or Jo.</p>
+<br><img src="{{ url_for('static', filename='img/not-found.png') }}" alt="404" width="150"></br>
+<br></br>
+<a href="{{ url_for('main.po_list') }}" class="btn">Back to PO List</a>
+{% endblock %}

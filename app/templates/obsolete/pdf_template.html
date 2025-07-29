@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}PO Preview{% endblock %}
+{% block content %}
+
+<div class="noprint" style="margin-bottom: 1em;">
+  <button onclick="window.print()">🖨️ Print</button>
+  <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn" target="_blank">📥 Download PDF</a>
+</div>
+
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1em;">
+  <img src="{{ url_for('static', filename='img/PSS_Standard_RGB.png') }}" alt="Logo" style="height: 200px;">
+  <div style="text-align: right;">
+    <h2 style="margin: 0;">Purchase Order</h2>
+    <p style="margin: 0;"><strong>PO Number:</strong> {{ "%06d"|format(po['po_number']) }}-{{ po['projects'].get('projectnumber', '') }}</p>
+    <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>
+  </div>
+</div>
+<hr style="margin: 1em 0;">
+
+{% if po and po.get('id') %}
+
+<p><strong>Supplier:</strong>
+  {% if po.get('suppliers') %}
+    {{ po['suppliers'].get('name', '') }}
+  {% else %}—
+  {% endif %}
+</p>
+<hr>
+<h3>Line Items</h3>
+{% if po.get('line_items') %}
+<table>
+  <thead>
+    <tr>
+      <th>Description</th>
+      <th>Qty</th>
+      <th>UOM</th>
+      <th style="text-align: right;">Unit Price</th>
+      <th style="text-align: right;">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in po['line_items'] %}
+    <tr>
+      <td>{{ item.get('description') }}</td>
+      <td>{{ item.get('quantity') }}</td>
+      <td>{{ item.get('units') }}</td>
+      <td style="text-align: right;">£{{ "{:,.2f}".format(item.unit_price) }}</td>
+      <td style="text-align: right;">£{{ "{:,.2f}".format(item.total) }}</td>
+
+
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="4" style="text-align: right; font-weight: bold;">Net Total</td>
+      <td style="text-align: right; font-weight: bold;">£{{ "{:,.2f}".format(net_total) }}</td>
+    </tr>
+    <tr>
+      <td colspan="4" style="text-align: right;">VAT</td>
+      <td style="text-align: right;">£{{ "{:,.2f}".format(vat_total) }}</td>
+    </tr>
+    <tr>
+      <td colspan="4" style="text-align: right; font-weight: bold;">Grand Total</td>
+      <td style="text-align: right; font-weight: bolder;">£{{ "{:,.2f}".format(grand_total) }}</td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<p>No line items available.</p>
+{% endif %}
+
+<hr>
+<p style="font-size: 0.9em;">Generated {{ now.strftime('%d %b %Y') }}</p>
+
+
+<hr>
+<a href="{{ url_for('main.edit_po', po_id=po['id']) }}" class="btn">✏️ Edit</a>
+{% else %}
+<p>PO not found.</p>
+{% endif %}
+{% endblock %}

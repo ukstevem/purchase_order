@@ -1,0 +1,118 @@
+/* ===== Base ===== */
+body {
+  font-family: sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.4;
+  color: rgb(6, 27, 55);
+  margin: 0;
+  padding: 0;
+  background-color: white;
+}
+
+/* ===== Page Layout ===== */
+.page {
+  display: block;
+  padding: 1cm 1.5cm;
+}
+
+/* ===== Header Image ===== */
+.logo {
+  height: 120px;
+}
+
+/* ===== Typography ===== */
+h2 {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+  font-size: 16pt;
+  color: rgb(6, 27, 55);
+}
+
+h3 {
+  margin-top: 1.5em;
+  font-size: 13pt;
+  color: rgb(6, 27, 55);
+}
+
+p {
+  margin: 0.25em 0;
+}
+
+/* ===== Table ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-top: 1rem;
+  font-size: 10pt;
+}
+
+thead {
+  background-color: rgb(151, 202, 235);
+  color: rgb(6, 27, 55);
+}
+
+th, td {
+  padding: 0.5em;
+  border: 1px solid #000;
+  text-align: left;
+  vertical-align: top;
+  word-wrap: break-word;
+}
+
+tfoot td {
+  font-weight: bold;
+}
+
+/* ===== Footer for Each Page ===== */
+.footer-left {
+  position: running(footer-left);
+  font-size: 9pt;
+  color: #444;
+  padding-top: 0.5em;
+  text-align: left;
+  width: 100%;
+}
+
+.footer-center {
+  position: running(footer-center);
+  font-size: 9pt;
+  color: #444;
+  padding-top: 0.5em;
+  text-align: center;
+  width: 100%;
+}
+
+.footer-right {
+  position: running(footer-right);
+  font-size: 9pt;
+  color: #444;
+  padding-top: 0.5em;
+  text-align: right;
+  width: 100%;
+}
+
+/* ===== Page Footer Placement ===== */
+@page {
+  size: A4;
+  margin: 1cm 1.5cm 2.5cm 1.5cm;
+
+  @bottom-left {
+    content: element(footer-left);
+  }
+  @bottom-center {
+    content: element(footer-center);
+  }
+  @bottom-right {
+    content: element(footer-right);
+  }
+}
+
+/* ===== Page Counters ===== */
+.page-number::before {
+  content: counter(page);
+}
+
+.total-pages::before {
+  content: counter(pages);
+}

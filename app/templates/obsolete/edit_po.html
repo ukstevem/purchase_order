@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Edit PO{% endblock %}
+{% block content %}
+<h2>Edit Purchase Order</h2>
+<form method="POST" action="{{ url_for('main.edit_po', po_id=po.id) }}">
+  <!-- Delivery Terms -->
+  <label for="delivery_terms">Delivery Terms</label>
+  <input type="text" name="delivery_terms" value="{{ po.po_metadata.delivery_terms }}" required>
+
+  <!-- Delivery Date -->
+  <label for="delivery_date">Delivery Date</label>
+  <input type="date" name="delivery_date" value="{{ po.po_metadata.delivery_date }}" required>
+
+  <!-- Shipping Method -->
+  <label for="shipping_method">Shipping Method</label>
+  <input type="text" name="shipping_method" value="{{ po.po_metadata.shipping_method }}" required>
+
+  <!-- Test Certificates -->
+  <label>
+    <input type="checkbox" name="test_cert_required" {% if po.po_metadata.test_cert_required %}checked{% endif %}> Test Certificates Required
+  </label>
+
+  <!-- Status -->
+  <label>Status</label><br>
+  <label><input type="radio" name="status" value="draft" {% if po.status == 'draft' %}checked{% endif %}> Draft</label>
+  <label><input type="radio" name="status" value="released" {% if po.status == 'released' %}checked{% endif %}> Released</label>
+
+  <button type="submit" class="btn">Save Changes</button>
+</form>
+{% endblock %}

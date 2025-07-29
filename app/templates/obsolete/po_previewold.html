@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}PO Preview{% endblock %}
+{% block content %}
+
+{% if not pdf %}
+  <div class="noprint" style="margin-bottom: 1em;">
+    <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn" target="_blank">Download PDF</a>
+  </div>
+{% endif %}
+
+{% if pdf %}
+  <div class="page">
+    <div class="content">
+{% endif %}
+
+  {% if pdf %}
+    <div class="pdf-wrapper">
+  {% endif %}
+
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1em;">
+      {% if logo_base64 %}
+        <img src="data:image/png;base64,{{ logo_base64 }}" alt="Logo" style="height: 150px;">
+      {% else %}
+        <img src="{{ url_for('static', filename='img/PSS_Standard_RGB.png') }}" alt="Logo" style="height: 200px;">
+      {% endif %}
+
+      <div style="text-align: right;">
+        <h2 style="margin: 0;">Purchase Order</h2>
+        <p style="margin: 0;"><strong>PO Number:</strong> {{ "%06d"|format(po['po_number']) }}-{{ po['projects'].get('projectnumber', '') }}</p>
+        <p style="margin: 0;"><strong>PO Date:</strong> {{ now.strftime('%d %b %Y') }}</p>
+        <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>
+      </div>
+    </div>
+    <hr style="margin: 1em 0;">
+
+    {% if po and po.get('id') %}
+
+    <p style="text-align: left;"><strong>Supplier:</strong><br>
+      {% if po.get('suppliers') %}
+    {{ po['suppliers'].get('name', '') }}<br>
+        {{ po['suppliers'].get('address_line1', '') }}<br>
+        {{ po['suppliers'].get('address_line2', '') }}<br>
+        {{ po['suppliers'].get('postcode', '') }}<br></p>
+      {% else %}—
+      {% endif %}
+    </p>
+    <hr>
+    <h3>Line Items</h3>
+    {% if po.get('line_items') %}
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th>Qty</th>
+          <th>UOM</th>
+          <th style="text-align: right;">Unit Price</th>
+          <th style="text-align: right;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in po['line_items'] %}
+        <tr>
+          <td>{{ item.get('description') }}</td>
+          <td>{{ item.get('quantity') }}</td>
+          <td>{{ item.get('units') }}</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(item.unit_price) }}</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(item.total) }}</td>
+
+
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" style="text-align: right; font-weight: bold;">Net Total</td>
+          <td style="text-align: right; font-weight: bold;">£{{ "{:,.2f}".format(net_total) }}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align: right;">VAT</td>
+          <td style="text-align: right;">£{{ "{:,.2f}".format(vat_total) }}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align: right; font-weight: bold;">Grand Total</td>
+          <td style="text-align: right; font-weight: bolder;">£{{ "{:,.2f}".format(grand_total) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p>No line items available.</p>
+    {% endif %}
+
+  {% if pdf %}
+    </div>
+  {% endif %}
+
+{% if pdf %}
+    </div>  {# end content #}
+    <div class="footer">
+      Generated {{ now.strftime('%d %b %Y') }}
+    </div>
+  </div>  {# end page #}
+{% endif %}
+
+{% if not pdf %}
+  <div class="noprint" style="margin-bottom: 1em;">
+    <a href="{{ url_for('main.edit_po', po_id=po['id']) }}" class="btn">✏️ Edit</a>
+  </div>
+{% endif %}
+
+{% else %}
+<p>PO not found.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Create PO{% endblock %}
+{% block content %}
+<h2>Create Purchase Order</h2>
+
+<form method="POST" action="{{ url_for('main.create_po') }}">
+  <!-- Project -->
+  <label for="project_id">Project</label>
+  <select name="project_id" required>
+    {% for project in projects %}
+    <option value="{{ project.id }}">{{ project.projectnumber }} - {{ project.projectdescription }}</option>
+    {% endfor %}
+  </select>
+
+  <!-- Supplier -->
+  <label for="supplier_id">Supplier</label>
+  <select name="supplier_id" required>
+    {% for supplier in suppliers %}
+    <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+    {% endfor %}
+  </select>
+
+  <!-- Delivery Terms -->
+  <label for="delivery_terms">Delivery Terms</label>
+  <input type="text" name="delivery_terms" required>
+
+  <!-- Delivery Date -->
+  <label for="delivery_date">Delivery Date</label>
+  <input type="date" name="delivery_date" required>
+
+  <!-- Shipping Method -->
+  <label for="shipping_method">Shipping Method</label>
+  <input type="text" name="shipping_method" required>
+
+  <!-- Test Certificates -->
+  <label>
+    <input type="checkbox" name="test_cert_required"> Test Certificates Required
+  </label>
+
+  <hr>
+
+  <!-- Line Items -->
+  <h3>Line Items</h3>
+<div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; font-weight: bold; margin-bottom: 0.5rem;">
+  <div>Description</div>
+  <div>Qty</div>
+  <div>Unit</div>
+  <div>Unit Price</div>
+  <div></div>
+</div>
+
+<div id="line-items-container">
+  <div class="line-item" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;">
+    <input type="text" name="description[]" placeholder="Description" required>
+    <input type="number" name="quantity[]" placeholder="Quantity" min="1" required>
+    <input type="text" name="unit[]" placeholder="Unit" required>
+    <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" required>
+    <button type="button" onclick="removeLineItem(this)">Remove</button>
+  </div>
+</div>
+
+<button type="button" onclick="addLineItem()">+ Add Line Item</button>
+
+<br><br>
+<button type="submit" class="btn">Create PO</button>
+
+</form>
+
+<script>
+function addLineItem() {
+  const container = document.getElementById('line-items-container');
+  const item = document.createElement('div');
+  item.className = 'line-item';
+  item.style = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;';
+  item.innerHTML = `
+    <input type="text" name="description[]" placeholder="Description" required>
+    <input type="number" name="quantity[]" placeholder="Quantity" min="1" required>
+    <input type="text" name="unit[]" placeholder="Unit" required>
+    <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" required>
+    <button type="button" onclick="removeLineItem(this)">Remove</button>
+  `;
+  container.appendChild(item);
+}
+
+function removeLineItem(button) {
+  button.parentElement.remove();
+}
+</script>
+
+{% endblock %}

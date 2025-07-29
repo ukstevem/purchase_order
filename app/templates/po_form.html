@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {{ 'Create PO' if mode == 'create' else 'Edit PO' }}
+{% endblock %}
+
+{% block content %}
+<h2>{{ 'Create Purchase Order' if mode == 'create' else 'Edit Purchase Order'  }}
+  {% if mode == 'edit' and po_data.po_number %}
+    <span class="text-muted">{{ "%06d"|format(po_data.po_number) }}</span>
+  {% endif %}
+</h2>
+
+<form method="POST" action="{{ form_action }}">
+
+<!-- Status -->
+  {% if mode == 'edit' and po_data.po_number %}
+      <label for="status">PO Status</label>
+        <select name="status" id="status" class="form-control">
+          {% for s in statuses %}
+            <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>{{ s.title() }}</option>
+          {% endfor %}
+        </select>
+  {% endif %}
+
+<!-- Project -->
+  <label for="project_id">Project</label>
+  <select name="project_id" required>
+    {% for project in projects %}
+      <option value="{{ project.id }}"
+        {% if po_data.get('project_id') == project.id %} selected {% endif %}>
+        {{ project.projectnumber }} - {{ project.projectdescription }}
+      </option>
+    {% endfor %}
+  </select>
+
+  <!-- Supplier -->
+  <label for="supplier_id">Supplier</label>
+  <select name="supplier_id" required>
+    {% for supplier in suppliers %}
+      <option value="{{ supplier.id }}"
+        {% if po_data.get('supplier_id') == supplier.id %} selected {% endif %}>
+        {{ supplier.name }}
+      </option>
+    {% endfor %}
+  </select>
+
+  <div class="form-group">
+
+    <!-- Delivery Address -->
+    <label for="delivery">Deliver To</label>
+    <select name="delivery_address_id" id="delivery_address_id" onchange="filterContacts()">
+      <option value="">-- Select Address --</option>
+      {% for address in delivery_addresses %}
+        <option value="{{ address.id }}" 
+                {% if po and po.delivery_address_id == address.id %}selected{% endif %}>
+          {{ address.name }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <label for="delivery_contact_id">Delivery Contact</label>
+    <select name="delivery_contact_id" id="delivery_contact_id" {% if not po %}disabled{% endif %}>
+      <option value="">-- Select Contact --</option>
+      {% for contact in delivery_contacts %}
+        <option value="{{ contact.id }}" 
+                data-address-id="{{ contact.address_id }}"
+                {% if po and po.delivery_contact_id == contact.id %}selected{% endif %}>
+          {{ contact.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Delivery Terms -->
+  <label for="delivery_terms">Delivery Terms</label>
+  <input type="text" name="delivery_terms" required value="{{ po_data.get('delivery_terms', '') }}">
+
+  <!-- Delivery Date -->
+  <label for="delivery_date">Delivery Date</label>
+  <input type="date" name="delivery_date" required value="{{ po_data.get('delivery_date', '') }}">
+
+  <!-- Test Certificates -->
+  <label>
+    <input type="checkbox" name="test_cert_required"
+      {% if po_data.get('test_cert_required') %} checked {% endif %}>
+    Test Certificates Required
+  </label>
+
+  <hr>
+
+  <!-- Line Items -->
+  <h3>Line Items</h3>
+  <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; font-weight: bold; margin-bottom: 0.5rem;">
+    <div>Description</div>
+    <div>Qty</div>
+    <div>Unit</div>
+    <div>Unit Price</div>
+    <div></div>
+  </div>
+
+  <div id="line-items-container">
+    {% for item in po_data.get('line_items', [{}]) %}
+      <div class="line-item" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;">
+        <input type="text" name="description[]" placeholder="Description" value="{{ item.get('description', '') }}" required>
+        <input type="number" name="quantity[]" placeholder="Quantity" min="1" value="{{ item.get('quantity', '') }}" required>
+        <input type="text" name="unit[]" placeholder="Unit" value="{{ item.get('unit', '') }}" required>
+        <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" value="{{ item.get('unit_price', '') }}" required>
+        <button type="button" onclick="removeLineItem(this)">Remove</button>
+      </div>
+    {% endfor %}
+  </div>
+
+  <button type="button" onclick="addLineItem()">+ Add Line Item</button>
+
+  <br><br>
+  <button type="submit" class="btn">
+    {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
+  </button>
+</form>
+
+<script>
+// Line item logic
+function addLineItem() {
+  const container = document.getElementById('line-items-container');
+  const item = document.createElement('div');
+  item.className = 'line-item';
+  item.style = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;';
+  item.innerHTML = `
+    <input type="text" name="description[]" placeholder="Description" required>
+    <input type="number" name="quantity[]" placeholder="Quantity" min="1" required>
+    <input type="text" name="unit[]" placeholder="Unit" required>
+    <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" required>
+    <button type="button" onclick="removeLineItem(this)">Remove</button>
+  `;
+  container.appendChild(item);
+}
+
+function removeLineItem(button) {
+  button.parentElement.remove();
+}
+
+// Delivery address → contact filtering
+function filterContacts() {
+  const selectedAddressId = document.getElementById('delivery_address_id').value;
+  const contactSelect = document.getElementById('delivery_contact_id');
+  const options = contactSelect.options;
+
+  contactSelect.disabled = !selectedAddressId;
+
+  for (let i = 0; i < options.length; i++) {
+    const option = options[i];
+    const optionAddressId = option.getAttribute('data-address-id');
+
+    if (i === 0) {
+      option.hidden = false; // Always keep the placeholder
+      continue;
+    }
+
+    // Keep selected contact visible even if mismatched (for edit mode)
+    if (optionAddressId === selectedAddressId || option.selected) {
+      option.hidden = false;
+    } else {
+      option.hidden = true;
+    }
+  }
+
+  // Reset the selection unless already valid
+  if (!contactSelect.querySelector('option:checked')?.hasAttribute('data-address-id') ||
+      contactSelect.querySelector('option:checked')?.getAttribute('data-address-id') !== selectedAddressId) {
+    contactSelect.value = '';
+  }
+}
+
+window.addEventListener("DOMContentLoaded", function () {
+  filterContacts();  // Pre-filter contacts on page load if editing
+});
+</script>
+
+{% endblock %}

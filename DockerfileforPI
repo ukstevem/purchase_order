@@ -1,0 +1,26 @@
+# Use a lightweight base image compatible with ARM (like Raspberry Pi OS)
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set work directory
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    libjpeg-dev \
+    libpq-dev \
+    wkhtmltopdf \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Copy project
+COPY . .
+
+# Run the app
+CMD ["flask", "run", "--host=0.0.0.0"]
