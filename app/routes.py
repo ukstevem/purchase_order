@@ -211,7 +211,6 @@ def edit_po(po_id):
                 new_status,
             )
             metadata["delivery_address_id"] = request.form.get("delivery_address_id") or None
-            metadata["manual_delivery_address"] = request.form.get("manual_delivery_address", "").strip() or None
             metadata["delivery_contact_id"] = delivery_contact_id
 
             # 7. Insert new PO + items
