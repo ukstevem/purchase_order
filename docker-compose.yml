@@ -1,19 +1,28 @@
-version: "3.8"
+version: "3.9"
+
 services:
   web:
+    container_name: po_system
     build:
-      context: .
-      dockerfile: Dockerfile.pi
-      # Pick the one that matches your Pi OS:
+      context: .                # repo root
+      dockerfile: Dockerfileforpi
       platforms:
-        - linux/arm64/v8   # 64-bit Raspberry Pi OS (aarch64)
-      # - linux/arm/v7     # 32-bit Raspberry Pi OS
-    env_file: .env
+        - linux/arm64/v8        # Raspberry Pi 64-bit OS
+        # - linux/arm/v7        # Uncomment if using 32-bit Pi OS
+    environment:
+      # Fill these in Portainer's "Env" tab (recommended). Examples:
+      # SUPABASE_URL: https://hguvsjpmiyeypfcuvvko.supabase.co
+      # SUPABASE_KEY: <paste-your-service-role-or-anon-key>
+      # SECRET_KEY: <random-string>
+      # FLASK_ENV: production
+      # FLASK_DEBUG: "0"
+      # PREFERRED_URL_SCHEME: http
     ports:
-      - "8000:8000"
+      - "8000:8000"             # host:container
     volumes:
       - ./instance:/app/instance
       - ./output:/app/output
-      # Optional: write PDFs to a network share mounted on the Pi host
+      # Optional: write PDFs to a host-mounted network share on the Pi
       # - /mnt/po_share:/mnt/share:rw
     restart: unless-stopped
+    # If your app binds only on 127.0.0.1, add: command: flask run --host=0.0.0.0 --port=8000
