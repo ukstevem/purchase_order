@@ -1,8 +1,13 @@
+/* ================================
+   PDF Stylesheet for PO Documents
+   (Merged: original + PO table overrides)
+   ================================ */
+
 /* ===== Base ===== */
 body {
   font-family: sans-serif;
-  font-size: 10.5pt;
-  line-height: 1.4;
+  font-size: 9pt;
+  line-height: 1.3;
   color: rgb(6, 27, 55);
   margin: 0;
   padding: 0;
@@ -34,17 +39,15 @@ h3 {
   color: rgb(6, 27, 55);
 }
 
-p {
-  margin: 0.25em 0;
-}
+p { margin: 0.25em 0; }
 
-/* ===== Table ===== */
+/* ===== Generic Table (kept from original) ===== */
 table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
   margin-top: 1rem;
-  font-size: 10pt;
+  font-size: 8pt;
 }
 
 thead {
@@ -60,59 +63,101 @@ th, td {
   word-wrap: break-word;
 }
 
-tfoot td {
-  font-weight: bold;
-}
+tfoot td { font-weight: bold; }
 
-/* ===== Footer for Each Page ===== */
-.footer-left {
-  position: running(footer-left);
-  font-size: 9pt;
-  color: #444;
-  padding-top: 0.5em;
-  text-align: left;
-  width: 100%;
-}
+/* ===== Footer for Each Page (kept) ===== */
+.footer-left  { position: running(footer-left);  font-size: 9pt; color: #444; padding-top: 0.5em; text-align: left;  width: 100%; }
+.footer-center{ position: running(footer-center);font-size: 9pt; color: #444; padding-top: 0.5em; text-align: center; width: 100%; }
+.footer-right { position: running(footer-right); font-size: 9pt; color: #444; padding-top: 0.5em; text-align: right; width: 100%; }
 
-.footer-center {
-  position: running(footer-center);
-  font-size: 9pt;
-  color: #444;
-  padding-top: 0.5em;
-  text-align: center;
-  width: 100%;
-}
-
-.footer-right {
-  position: running(footer-right);
-  font-size: 9pt;
-  color: #444;
-  padding-top: 0.5em;
-  text-align: right;
-  width: 100%;
-}
-
-/* ===== Page Footer Placement ===== */
+/* ===== Page Footer Placement (kept) ===== */
 @page {
   size: A4;
   margin: 1cm 1.5cm 2.5cm 1.5cm;
 
-  @bottom-left {
-    content: element(footer-left);
-  }
-  @bottom-center {
-    content: element(footer-center);
-  }
-  @bottom-right {
-    content: element(footer-right);
-  }
+  @bottom-left   { content: element(footer-left); }
+  @bottom-center { content: element(footer-center); }
+  @bottom-right  { content: element(footer-right); }
 }
 
-/* ===== Page Counters ===== */
-.page-number::before {
-  content: counter(page);
+/* ===== Page Counters (kept) ===== */
+.page-number::before { content: counter(page); }
+.total-pages::before { content: counter(pages); }
+
+/* =====================================================
+   PO LINE ITEMS TABLE (scoped, minimalist overrides)
+   Use: <table class="po-pdf-items">…</table>
+   ===================================================== */
+
+/* Repeat header/footer only for THIS table */
+table.po-pdf-items thead { display: table-header-group; }
+table.po-pdf-items tfoot { display: table-footer-group; }
+
+/* Minimalist base (override original borders) */
+table.po-pdf-items {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: .5rem;
+  font-size: 8pt;
 }
 
-.total-pages::before {
-  content: counter(pages);
+/* Remove grid borders just for this table */
+table.po-pdf-items th,
+table.po-pdf-items td {
+  padding: 6px 6px;
+  border: none !important;      /* override generic table borders */
+  vertical-align: top;
+}
+
+/* Keep your blue header background, but simplify lines */
+table.po-pdf-items thead th {
+  background-color: rgb(151, 202, 235); /* keep original colour */
+  color: rgb(6, 27, 55);                /* keep original text colour */
+  font-weight: 600;
+  border-bottom: 1px solid #cfd8e3;     /* single underline under header */
+  text-align: left;
+}
+
+/* Single overline above totals */
+table.po-pdf-items tfoot td {
+  border-top: 1px solid #cfd8e3;
+}
+
+/* Column widths (Description flexible) */
+table.po-pdf-items th.col-idx   { width: 5%;  text-align: center; }
+table.po-pdf-items th.col-desc  { width: auto; }   /* flexible */
+table.po-pdf-items th.col-qty   { width: 10%; text-align: center; }
+table.po-pdf-items th.col-unit  { width: 10%; }
+table.po-pdf-items th.col-price { width: 15%; }
+table.po-pdf-items th.col-total { width: 15%; }
+
+/* Alignments & helpers (scoped-safe utility classes) */
+.center { text-align: center; }
+.num    { text-align: right; white-space: nowrap; overflow: hidden; } /* contains £/number floats */
+.wrap   { white-space: normal; word-break: break-word; }
+.nowrap { white-space: nowrap; }
+
+/* Subtle zebra striping for readability (optional) */
+table.po-pdf-items tbody tr:nth-child(even) { background: #f8fafc; }
+
+/* Avoid row splits across pages when possible */
+table.po-pdf-items tr { break-inside: avoid; }
+
+/* Make manual-address <pre> wrap nicely */
+pre { white-space: pre-wrap; margin: 0; }
+
+
+/* Certs table styling */
+
+table.certs-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: .3cm; }
+.certs-table thead th { border: 1px solid rgba(6,27,55,.4); padding: 4px 4px; text-align: left; font-weight: 600; background: rgb(233,242,249); color: rgb(6,27,55); }
+.certs-table tbody td { border: 1px solid rgba(6,27,55,.25); padding: 4px 4px; vertical-align: top; }
+.certs-table tr { break-inside: avoid; page-break-inside: avoid; }
+.certs-table td, .certs-table th { line-height: 1.25; }
+
+/* Start certs section on a new page */
+.break-before {
+  break-before: page;        /* WeasyPrint */
+  page-break-before: always; /* legacy */
 }

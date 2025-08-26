@@ -3,6 +3,7 @@ import logging
 from flask import current_app
 from app.utils.status_utils import validate_po_status, POStatus
 import string
+import uuid
 
 def get_headers():
     key = current_app.config.get("SUPABASE_API_KEY")
@@ -53,48 +54,149 @@ def fetch_delivery_contacts():
     r.raise_for_status()
     return r.json()
 
+def _clean(x):
+    x = (x or "").strip() if isinstance(x, str) else x
+    return x or None
+
+def _is_uuid(val):
+    try:
+        uuid.UUID(str(val))
+        return True
+    except Exception:
+        return False
+
+def insert_delivery_contact(contact: dict) -> str:
+    """
+    Insert a delivery contact and return its UUID.
+
+    Accepted keys:
+      name (req), email (req), phone (opt), address_id (req, UUID), active (opt -> True)
+    Also tolerates callers passing 'manual_contact_*' + 'delivery_address_id' and normalizes them.
+    """
+    # 🔧 Backwards-compat: normalize manual_* payloads from routes if present
+    if any(k in contact for k in ("manual_contact_name", "manual_contact_email", "manual_contact_phone", "delivery_address_id")):
+        contact = {
+            "name":       contact.get("manual_contact_name"),
+            "email":      contact.get("manual_contact_email"),
+            "phone":      contact.get("manual_contact_phone"),
+            "address_id": contact.get("delivery_address_id"),
+            "active":     contact.get("active", True),
+        }
+
+    payload = {
+        "name":       _clean(contact.get("name")),
+        "email":      _clean(contact.get("email")),
+        "phone":      _clean(contact.get("phone")),
+        "address_id": contact.get("address_id"),
+        "active":     bool(contact.get("active", True)),
+    }
+
+    # ✅ Validate required fields
+    if not payload["name"] or not payload["email"]:
+        raise ValueError("insert_delivery_contact requires non-empty 'name' and 'email'.")
+    if not payload["address_id"] or not _is_uuid(payload["address_id"]):
+        raise ValueError("insert_delivery_contact requires a valid UUID 'address_id' (Delivery Address dropdown).")
+
+    url = f"{current_app.config['SUPABASE_URL']}/rest/v1/delivery_contacts"
+    headers = {**get_headers(), "Prefer": "return=representation"}
+
+    resp = requests.post(url, headers=headers, json=payload)
+
+    # Helpful error logging if Supabase rejects the row
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+        except Exception:
+            err = {"body": resp.text}
+        current_app.logger.error("❌ delivery_contacts insert failed %s: %s | payload=%s",
+                                 resp.status_code, err, payload)
+    resp.raise_for_status()
+
+    data = resp.json()
+    if not data or "id" not in data[0]:
+        raise RuntimeError("delivery_contacts insert returned no id.")
+    return data[0]["id"]
+
+
+def _extract_manual_delivery_contact(data: dict) -> dict | None:
+    """
+    Pulls manual contact fields from metadata built in your routes.
+    Matches your current names: manual_contact_name/phone/email.
+    Returns None if nothing meaningful was provided.
+    """
+    name  = (data.get("manual_contact_name")  or "").strip()
+    phone = (data.get("manual_contact_phone") or "").strip()
+    email = (data.get("manual_contact_email") or "").strip()
+    addr  = data.get("delivery_address_id")  # UUID string or None
+
+    # If all empty, treat as absent
+    if not (name or phone or email):
+        return None
+
+    # You can extend with company/address if you add those fields later
+    return {
+        "name": name,
+        "phone": phone,
+        "email": email,
+        "address_id": addr,   # <-- crucial for insert_delivery_contact
+        "active": True,
+    }
+
 def insert_po_bundle(data):
     """
     Inserts a new PO record and its associated metadata.
-    - On creation: pass project_id, supplier_id, delivery info (and optionally po_number)
-    - On edit: include original po_number and updated revision
-
+    - If delivery_contact_id not provided but manual_contact_* present,
+      create a delivery_contacts row and link it.
     Returns the new PO UUID.
     """
     from flask import current_app
     import requests
 
-    status = data.get("status", POStatus.DRAFT.value)
-    revision = data.get("current_revision", "a")
+    status    = data.get("status", POStatus.DRAFT.value)
+    revision  = data.get("current_revision", "a")
     po_number = data.get("po_number")
-
-    # print(f"Status ----------- : {data.get(status)}")
 
     validate_po_status(status)
 
-    # Step 1: Insert into purchase_orders
+    # === Create contact from manual fields if needed (now includes address_id via extractor) ===
+    delivery_contact_id = data.get("delivery_contact_id") or None
+    if not delivery_contact_id:
+        manual = _extract_manual_delivery_contact(data)  # includes address_id mapped from delivery_address_id
+        if manual and manual.get("address_id"):
+            try:
+                delivery_contact_id = insert_delivery_contact(manual)
+            except Exception as e:
+                current_app.logger.error("❌ Manual delivery contact create failed: %s", e)
+        else:
+            current_app.logger.info("ℹ️ Skipping delivery_contacts insert (no manual or missing address_id).")
+
+    # === Step 1: Insert into purchase_orders (MINIMAL payload – avoid unknown columns) ===
     po_payload = {
         "project_id": data["project_id"],
         "supplier_id": data["supplier_id"],
         "status": status,
         "current_revision": revision,
-        "delivery_contact_id": data.get("delivery_contact_id")
+        "delivery_contact_id": delivery_contact_id,  # may be None or a UUID
     }
-
     if po_number:
         po_payload["po_number"] = po_number  # Keep same number when editing
 
-    # logging.info("📤 PO insert payload: %s", po_payload)
-
     po_url = f"{current_app.config['SUPABASE_URL']}/rest/v1/purchase_orders"
     po_resp = requests.post(po_url, headers=get_headers(), json=po_payload)
-    # logging.info("📬 PO response:", po_resp.status_code, po_resp.text)
+
+    if po_resp.status_code >= 400:
+        # surface real error to logs so we can see what's wrong
+        try:
+            err = po_resp.json()
+        except Exception:
+            err = {"body": po_resp.text}
+        current_app.logger.error("❌ purchase_orders insert failed %s: %s | payload=%s",
+                                 po_resp.status_code, err, po_payload)
     po_resp.raise_for_status()
 
-    po_data = po_resp.json()
-    po_id = po_data[0]["id"]
+    po_id = po_resp.json()[0]["id"]
 
-    # Step 2: Insert into po_metadata
+    # === Step 2: Insert into po_metadata (store manual fields for display/PDF) ===
     meta_payload = {
         "po_id": po_id,
         "delivery_terms": data["delivery_terms"],
@@ -102,18 +204,21 @@ def insert_po_bundle(data):
         "supplier_contact_name": data.get("supplier_contact_name", ""),
         "supplier_reference_number": data.get("supplier_reference_number", ""),
         "test_certificates_required": data["test_certificates_required"],
-        "active": True
+        "active": True,
     }
 
-    # logging.info("📤 Metadata insert payload:", meta_payload)
-    
     meta_url = f"{current_app.config['SUPABASE_URL']}/rest/v1/po_metadata"
     meta_resp = requests.post(meta_url, headers=get_headers(), json=meta_payload)
-    # logging.info("📬 Metadata response:", meta_resp.status_code, meta_resp.text)
+    if meta_resp.status_code >= 400:
+        try:
+            err = meta_resp.json()
+        except Exception:
+            err = {"body": meta_resp.text}
+        current_app.logger.error("❌ po_metadata insert failed %s: %s | payload=%s",
+                                 meta_resp.status_code, err, meta_payload)
     meta_resp.raise_for_status()
 
     return po_id
-
 
 def insert_line_items(items):
     if not items:
@@ -267,4 +372,3 @@ def fetch_all_po_revisions(po_number: int):
     response = requests.get(url, headers=get_headers(), params=params)
     response.raise_for_status()
     return response.json()
-

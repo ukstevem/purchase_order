@@ -1,0 +1,27 @@
+<h3 class="break-before" style="margin-top:1.2em; text-align:center;">Minimum Certification Documentation Required (EN 10204)</h3>
+
+<table class="certs-table" style="width:100%; table-layout:fixed;">
+  <colgroup>
+    <col style="width:auto;">
+    <col style="width:22%;">
+    <col style="width:20%;">
+  </colgroup>
+
+  <thead>
+    <tr>
+      <th>Product / Service</th>
+      <th style="white-space:nowrap;">Standard</th>
+      <th style="white-space:nowrap; text-align:center;">Certification</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in certs_table %}
+    <tr>
+      <td>{{ row.product }}</td>
+      <td style="white-space:nowrap;">{{ row.standard }}</td>
+      <td style="white-space:nowrap;">{{ row.documentation }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p>* Report content to be approved by PSS, thickness of any coatings to be checked and included in any reports.</p>

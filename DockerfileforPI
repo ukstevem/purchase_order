@@ -1,26 +1,36 @@
-# Use a lightweight base image compatible with ARM (like Raspberry Pi OS)
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Set work directory
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN apt-get update && apt-get install -y \
+# WeasyPrint native deps (cairo/pango/gdk-pixbuf/glib/etc.) + fonts
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libpangoft2-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libglib2.0-0 \
+    libharfbuzz0b \
     libffi-dev \
-    libssl-dev \
-    libjpeg-dev \
-    libpq-dev \
-    wkhtmltopdf \
-    && pip install --no-cache-dir -r requirements.txt
+    libxml2 \
+    libxslt1.1 \
+    shared-mime-info \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-core \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copy project
+# Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# App
 COPY . .
 
-# Run the app
-CMD ["flask", "run", "--host=0.0.0.0"]
+# Gunicorn (run.py defines `app = create_app()`, so target is run:app)
+ENV PORT=8000
+CMD ["gunicorn","-b","0.0.0.0:8000","-w","2","--timeout","120","run:app"]

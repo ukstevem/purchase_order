@@ -1,11 +1,19 @@
-version: '3.8'
+version: "3.8"
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.pi
+      # Pick the one that matches your Pi OS:
+      platforms:
+        - linux/arm64/v8   # 64-bit Raspberry Pi OS (aarch64)
+      # - linux/arm/v7     # 32-bit Raspberry Pi OS
+    env_file: .env
     ports:
-      - "5000:5000"
+      - "8000:8000"
     volumes:
-      - .:/app
-    environment:
-      - FLASK_APP=app.py
-      - FLASK_ENV=development
+      - ./instance:/app/instance
+      - ./output:/app/output
+      # Optional: write PDFs to a network share mounted on the Pi host
+      # - /mnt/po_share:/mnt/share:rw
+    restart: unless-stopped

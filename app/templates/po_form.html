@@ -11,19 +11,10 @@
   {% endif %}
 </h2>
 
-<form method="POST" action="{{ form_action }}">
-
-<!-- Status -->
-  {% if mode == 'edit' and po_data.po_number %}
-      <label for="status">PO Status</label>
-        <select name="status" id="status" class="form-control">
-          {% for s in statuses %}
-            <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>{{ s.title() }}</option>
-          {% endfor %}
-        </select>
-  {% endif %}
-
-<!-- Project -->
+<form method="POST" action="{{ form_action }}" id="po-form">
+  <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+  
+  <!-- Project -->
   <label for="project_id">Project</label>
   <select name="project_id" required>
     {% for project in projects %}
@@ -45,7 +36,7 @@
     {% endfor %}
   </select>
 
-  <div class="form-group">
+    <div class="form-group">
     <!-- Delivery Address (Controlled List Only) -->
     <label for="delivery_address_id">Deliver To</label>
     <select name="delivery_address_id" id="delivery_address_id" onchange="filterContacts()">
@@ -74,164 +65,348 @@
 
     <!-- Manual Contact Inputs (hidden by default) -->
     <div id="manual_contact_container" style="display: none; margin-top: 10px;">
-        <label for="manual_contact_name">Contact Name</label>
-        <input type="text" name="manual_contact_name" id="manual_contact_name" 
-               placeholder="Contact name..." 
-               value="{{ po_data.get('manual_contact_name', '') }}">
-        
-        <label for="manual_contact_phone">Contact Phone</label>
-        <input type="tel" name="manual_contact_phone" id="manual_contact_phone" 
-               placeholder="Phone number..." 
-               value="{{ po_data.get('manual_contact_phone', '') }}">
-        
-        <label for="manual_contact_email">Contact Email</label>
-        <input type="email" name="manual_contact_email" id="manual_contact_email" 
-               placeholder="Email address..." 
-               value="{{ po_data.get('manual_contact_email', '') }}">
+      <div class="form-row">
+        <div class="form-col">
+          <label for="manual_contact_name">Contact Name</label>
+          <input type="text" name="manual_contact_name" id="manual_contact_name"
+                placeholder="Contact name..."
+                value="{{ po_data.get('manual_contact_name', '') }}">
+        </div>
+        <div class="form-col">
+          <label for="manual_contact_phone">Phone</label>
+          <input type="tel" name="manual_contact_phone" id="manual_contact_phone"
+                placeholder="Phone number..."
+                value="{{ po_data.get('manual_contact_phone', '') }}">
+        </div>
+        <div class="form-col">
+          <label for="manual_contact_email">Email</label>
+          <input type="email" name="manual_contact_email" id="manual_contact_email"
+                placeholder="Email address..."
+                value="{{ po_data.get('manual_contact_email', '') }}">
+        </div>
+      </div>
+    </div>
+
+    <!-- Delivery Date + Terms + Test Certificates in one row -->
+  <div class="form-row">
+    <div class="form-col narrow">
+      <label for="delivery_date">Delivery Date</label>
+      <input type="date" name="delivery_date" id="delivery_date"
+            required value="{{ po_data.get('delivery_date', '') }}">
+    </div>
+    <div class="form-col">
+      <label for="delivery_terms">Delivery Terms</label>
+      <select id="delivery_terms" name="delivery_terms" required>
+        <option value="">-- Select Incoterm --</option>
+        <option value="EXW" {% if po_data.get('delivery_terms') == 'EXW' %}selected{% endif %}>EXW — Ex Works</option>
+        <option value="FCA" {% if po_data.get('delivery_terms') == 'FCA' %}selected{% endif %}>FCA — Free Carrier</option>
+        <option value="CPT" {% if po_data.get('delivery_terms') == 'CPT' %}selected{% endif %}>CPT — Carriage Paid To</option>
+        <option value="CIP" {% if po_data.get('delivery_terms') == 'CIP' %}selected{% endif %}>CIP — Carriage and Insurance Paid To</option>
+        <option value="DAP" {% if po_data.get('delivery_terms') == 'DAP' %}selected{% endif %}>DAP — Delivered At Place</option>
+        <option value="DPU" {% if po_data.get('delivery_terms') == 'DPU' %}selected{% endif %}>DPU — Delivered at Place Unloaded</option>
+        <option value="DDP" {% if po_data.get('delivery_terms') == 'DDP' %}selected{% endif %}>DDP — Delivered Duty Paid</option>
+        <option value="FAS" {% if po_data.get('delivery_terms') == 'FAS' %}selected{% endif %}>FAS — Free Alongside Ship</option>
+        <option value="FOB" {% if po_data.get('delivery_terms') == 'FOB' %}selected{% endif %}>FOB — Free On Board</option>
+        <option value="CFR" {% if po_data.get('delivery_terms') == 'CFR' %}selected{% endif %}>CFR — Cost and Freight</option>
+        <option value="CIF" {% if po_data.get('delivery_terms') == 'CIF' %}selected{% endif %}>CIF — Cost, Insurance & Freight</option>
+      </select>
+    </div>
+    <div class="form-col narrow">
+      <label for="test_cert_required">Test Certificates Required</label>
+      <select name="test_cert_required" id="test_cert_required">
+        <option value="0" {% if not po_data.get('test_cert_required') %}selected{% endif %}>No</option>
+        <option value="1" {% if po_data.get('test_cert_required') %}selected{% endif %}>Yes</option>
+      </select>
     </div>
   </div>
 
-  <!-- Delivery Terms -->
-  <label for="delivery_terms">Delivery Terms</label>
-  <input type="text" name="delivery_terms" required value="{{ po_data.get('delivery_terms', '') }}">
-
-  <!-- Delivery Date -->
-  <label for="delivery_date">Delivery Date</label>
-  <input type="date" name="delivery_date" required value="{{ po_data.get('delivery_date', '') }}">
-
-  <!-- Test Certificates -->
-  <label>
-    <input type="checkbox" name="test_cert_required"
-      {% if po_data.get('test_cert_required') %} checked {% endif %}>
-    Test Certificates Required
-  </label>
 
   <hr>
 
-  <!-- Line Items -->
   <h3>Line Items</h3>
-  <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; font-weight: bold; margin-bottom: 0.5rem;">
-    <div>Description</div>
-    <div>Qty</div>
-    <div>Unit</div>
-    <div>Unit Price</div>
-    <div></div>
-  </div>
 
-  <div id="line-items-container">
-    {% for item in po_data.get('line_items', [{}]) %}
-      <div class="line-item" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;">
-        <input type="text" name="description[]" placeholder="Description" value="{{ item.get('description', '') }}" required>
-        <input type="number" name="quantity[]" placeholder="Quantity" min="1" value="{{ item.get('quantity', '') }}" required>
-        <input type="text" name="unit[]" placeholder="Unit" value="{{ item.get('unit', '') }}" required>
-        <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" value="{{ item.get('unit_price', '') }}" required>
-        <button type="button" onclick="removeLineItem(this)">Remove</button>
+  <table class="line-items">
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th style="width: 80px;">Qty</th>
+        <th style="width: 80px;">Unit</th>
+        <th style="width: 120px;">Unit Price</th>
+        <th style="width: 130px;">Line Total</th>
+        <th style="width: 80px;"></th>
+      </tr>
+    </thead>
+    <tbody id="line-items-container">
+      {% for item in po_data.get('line_items', [{}]) %}
+        <tr>
+          <td><input type="text" name="description[]" value="{{ item.get('description', '') }}" placeholder="Description" required></td>
+          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
+          <td><input type="text" name="unit[]" value="{{ item.get('unit', '') }}" placeholder="Unit" required></td>
+          <td>
+            <div class="money-input-wrap">
+              <input type="text" name="unit_price[]"
+                    value="{{ '{:,.2f}'.format(item.get('unit_price', 0)) if item.get('unit_price') else '' }}"
+                    placeholder="Unit Price"
+                    class="money-input"
+                    oninput="formatMoneyInput(this); updateTotal()">
+            </div>
+          </td>
+          <td class="money"><span class="currency">£</span><span class="row-total">0.00</span></td>
+          <td class="actions">
+            <button type="button" class="btn" onclick="removeLineItem(this)">Remove</button>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3"></td>
+        <td class="total-label">Total:</td>
+        <td class="total-value"><span class="currency">£</span><span id="po-total">0.00</span></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <br>
+
+  <button type="button" class="btn" onclick="addLineItem()">+ Add Line Item</button>
+
+  <!-- Actions row -->
+  <div style="text-align: right; margin-top: 1.5rem;">
+    {% if mode == 'edit' and po_data.po_number %}
+      <div style="display: inline-block; vertical-align: bottom; margin-right: 1rem; text-align: left;">
+        <label for="status" style="display:block; margin:0 0 0.25rem 0;">PO Status:</label>
+        <select name="status" id="status"
+                style="width: 180px; height: 36px; line-height: 36px; padding: 0 0.5rem; box-sizing: border-box; margin: 0;">
+          {% for s in statuses %}
+            <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>
+              {{ s.title() }}
+            </option>
+          {% endfor %}
+        </select>
       </div>
-    {% endfor %}
+    {% endif %}
+
+    <div style="display: inline-block; vertical-align: bottom;">
+      <button type="submit" class="btn" id="save-btn"
+              style="height: 36px; line-height: 36px; padding: 0 1rem; box-sizing: border-box; margin: 0;">
+        {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
+      </button>
+    </div>
   </div>
 
-  <button type="button" onclick="addLineItem()">+ Add Line Item</button>
-
-  <br><br>
-  <button type="submit" class="btn">
-    {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
-  </button>
 </form>
 
 <script>
-// Line item logic
+/* -------------------- Line items (add/remove) -------------------- */
 function addLineItem() {
   const container = document.getElementById('line-items-container');
-  const item = document.createElement('div');
-  item.className = 'line-item';
-  item.style = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem;';
-  item.innerHTML = `
-    <input type="text" name="description[]" placeholder="Description" required>
-    <input type="number" name="quantity[]" placeholder="Quantity" min="1" required>
-    <input type="text" name="unit[]" placeholder="Unit" required>
-    <input type="number" name="unit_price[]" placeholder="Unit Price" step="0.01" required>
-    <button type="button" onclick="removeLineItem(this)">Remove</button>
+  const row = document.createElement('tr');
+  row.innerHTML = `
+    <td><input type="text" name="description[]" placeholder="Description" required></td>
+    <td><input type="number" name="quantity[]" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
+    <td><input type="text" name="unit[]" placeholder="Unit" required></td>
+    <td>
+      <div class="money-input-wrap">
+        <input type="text" name="unit_price[]" placeholder="Unit Price" class="money-input">
+      </div>
+    </td>
+    <td class="money"><span class="currency">£</span><span class="row-total">0.00</span></td>
+    <td class="actions"><button type="button" class="btn" onclick="removeLineItem(this)">Remove</button></td>
   `;
-  container.appendChild(item);
+  container.appendChild(row);
+  wireMoneyInputs(row);   // <-- important: attach listeners to the new money input
+  updateTotal();
 }
 
 function removeLineItem(button) {
-  button.parentElement.remove();
+  button.closest('tr').remove();
+  updateTotal();
 }
 
-// Toggle manual contact input
-function toggleManualContact() {
-    const contactSelect = document.getElementById('delivery_contact_id');
-    const manualContainer = document.getElementById('manual_contact_container');
-    const nameInput = document.getElementById('manual_contact_name');
-    
-    if (contactSelect.value === 'manual') {
-        manualContainer.style.display = 'block';
-        nameInput.required = true;
-    } else {
-        manualContainer.style.display = 'none';
-        nameInput.required = false;
-    }
+/* -------------------- Money input formatting -------------------- */
+/* Parse "£1,234.56" or "1234.56" -> 1234.56 */
+function parseMoney(str) {
+  if (!str) return 0;
+  const raw = String(str).replace(/[^0-9.]/g, "");
+  const num = parseFloat(raw);
+  return isNaN(num) ? 0 : num;
 }
 
-// Delivery address → contact filtering
-function filterContacts() {
-    const selectedAddressId = document.getElementById('delivery_address_id').value;
-    const contactSelect = document.getElementById('delivery_contact_id');
-    const options = contactSelect.options;
-
-    // Enable/disable contact dropdown based on address selection
-    contactSelect.disabled = !selectedAddressId;
-
-    // Track if current selection is still valid
-    let currentSelectionValid = false;
-    const currentValue = contactSelect.value;
-
-    for (let i = 0; i < options.length; i++) {
-        const option = options[i];
-        const optionAddressId = option.getAttribute('data-address-id');
-
-        if (i === 0 || option.value === 'manual') {
-            // Always keep the placeholder and manual option visible
-            option.hidden = false;
-            continue;
-        }
-
-        if (optionAddressId === selectedAddressId) {
-            option.hidden = false;
-            // Check if current selection is still valid
-            if (option.value === currentValue) {
-                currentSelectionValid = true;
-            }
-        } else {
-            option.hidden = true;
-        }
-    }
-
-    // Reset selection if current selection is no longer valid
-    if (!currentSelectionValid && currentValue !== '' && currentValue !== 'manual') {
-        contactSelect.value = '';
-    }
+/* Format 1234.56 -> "1,234.56" (no currency symbol in inputs) */
+function formatMoneyNumber(num) {
+  return Number(num).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Initialize on page load
-window.addEventListener("DOMContentLoaded", function () {
-    // Handle existing manual contact data on edit
-    const contactSelect = document.getElementById('delivery_contact_id');
-    const manualContactName = document.getElementById('manual_contact_name').value.trim();
-    
-    // If we have manual contact data but no selected contact, show manual input
-    if (manualContactName && !contactSelect.value) {
-        contactSelect.value = 'manual';
-        toggleManualContact();
-    }
-    
-    // Set up initial filtering
-    filterContacts();
-    
-    // Initialize manual contact input visibility
-    toggleManualContact();
+/* On focus: show plain number (no commas) */
+function moneyFocus(e) {
+  const input = e.target;
+  const raw = input.dataset.rawValue ?? parseMoney(input.value);
+  input.value = raw ? String(raw) : "";
+}
+
+/* On input: update raw value; DO NOT reformat (preserves caret) */
+function moneyInput(e) {
+  const input = e.target;
+  const raw = parseMoney(input.value);
+  input.dataset.rawValue = raw;
+  updateTotal();
+}
+
+/* On blur: format nicely with commas */
+function moneyBlur(e) {
+  const input = e.target;
+  const raw = input.dataset.rawValue ?? parseMoney(input.value);
+  input.dataset.rawValue = raw;
+  input.value = raw ? formatMoneyNumber(raw) : "";
+}
+
+/* Attach money listeners to existing or newly-added rows */
+function wireMoneyInputs(root = document) {
+  root.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
+    if (input._moneyWired) return;
+    input._moneyWired = true;
+    input.addEventListener('focus', moneyFocus);
+    input.addEventListener('input', moneyInput);
+    input.addEventListener('blur', moneyBlur);
+
+    // Initial normalisation: capture raw and show formatted
+    const raw = parseMoney(input.value);
+    input.dataset.rawValue = raw;
+    input.value = raw ? formatMoneyNumber(raw) : "";
+  });
+}
+
+// Before submit: replace formatted prices with raw numeric values
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.querySelector('form');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    document.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
+      const raw = (input.dataset.rawValue != null)
+        ? String(input.dataset.rawValue)
+        : (input.value || '').replace(/[^0-9.]/g, '');
+      input.value = raw; // ensure backend gets e.g. "11111.00"
+    });
+  });
 });
+
+/* -------------------- Totals -------------------- */
+function updateTotal() {
+  const rows = document.querySelectorAll('#line-items-container tr');
+  let grand = 0;
+
+  rows.forEach(row => {
+    const qty = parseFloat(row.querySelector('input[name="quantity[]"]')?.value) || 0;
+
+    const priceInput = row.querySelector('input[name="unit_price[]"]');
+    const price = priceInput?.dataset.rawValue
+      ? parseFloat(priceInput.dataset.rawValue)
+      : parseMoney(priceInput?.value);
+
+    const line = qty * (isNaN(price) ? 0 : price);
+
+    const cell = row.querySelector('.row-total');
+    if (cell) cell.textContent = formatMoneyNumber(line);
+
+    grand += line;
+  });
+
+  const totalSpan = document.getElementById('po-total');
+  if (totalSpan) totalSpan.textContent = formatMoneyNumber(grand);
+}
+
+/* -------------------- Manual contact helpers -------------------- */
+function setManualInputsEnabled(enabled) {
+  const manualContainer = document.getElementById('manual_contact_container');
+  const nameInput = document.getElementById('manual_contact_name');
+  const phoneInput = document.getElementById('manual_contact_phone');
+  const emailInput = document.getElementById('manual_contact_email');
+
+  manualContainer.style.display = enabled ? 'block' : 'none';
+  nameInput.disabled = !enabled;
+  phoneInput.disabled = !enabled;
+  emailInput.disabled = !enabled;
+  nameInput.required = !!enabled;
+}
+function clearManualInputs() {
+  document.getElementById('manual_contact_name').value = "";
+  document.getElementById('manual_contact_phone').value = "";
+  document.getElementById('manual_contact_email').value = "";
+}
+function toggleManualContact() {
+  const contactSelect = document.getElementById('delivery_contact_id');
+  const isManual = contactSelect.value === 'manual';
+  clearManualInputs();
+  setManualInputsEnabled(isManual);
+}
+
+/* -------------------- Address → contact filtering -------------------- */
+function filterContacts() {
+  const selectedAddressId = document.getElementById('delivery_address_id').value;
+  const contactSelect = document.getElementById('delivery_contact_id');
+  const options = contactSelect.options;
+
+  contactSelect.disabled = !selectedAddressId;
+
+  let currentSelectionValid = false;
+  const currentValue = contactSelect.value;
+
+  for (let i = 0; i < options.length; i++) {
+    const option = options[i];
+    const optionAddressId = option.getAttribute('data-address-id');
+
+    if (i === 0 || option.value === 'manual') {
+      option.hidden = false;
+      continue;
+    }
+    if (optionAddressId === selectedAddressId) {
+      option.hidden = false;
+      if (option.value === currentValue) currentSelectionValid = true;
+    } else {
+      option.hidden = true;
+    }
+  }
+
+  if (!currentSelectionValid && currentValue !== '' && currentValue !== 'manual') {
+    contactSelect.value = '';
+  }
+}
+
+/* -------------------- Init -------------------- */
+window.addEventListener("DOMContentLoaded", function () {
+  // Money inputs + totals
+  wireMoneyInputs(document);
+  updateTotal();
+
+  // Manual contact init
+  const contactSelect = document.getElementById('delivery_contact_id');
+  const manualContactNameEl = document.getElementById('manual_contact_name');
+  const manualContactName = manualContactNameEl ? manualContactNameEl.value.trim() : "";
+
+  if (manualContactName && !contactSelect.value) {
+    contactSelect.value = 'manual';
+  }
+
+  toggleManualContact();
+  filterContacts();
+});
+
+/* -------------------- Disable save button on press -------------------- */
+
+  (function () {
+    const form = document.getElementById('po-form');
+    const btn  = document.getElementById('save-btn');
+    let submitted = false;
+    form.addEventListener('submit', function (e) {
+      if (submitted) { e.preventDefault(); return; }
+      submitted = true;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+    });
+  })();
+
+
 </script>
 
 {% endblock %}

@@ -2,8 +2,35 @@
 {% block title %}PO PDF Preview{% endblock %}
 {% block content %}
 
+{# Macro: accounting-style currency with £ left, number right, negatives in parentheses #}
+{% macro money_cell(value) -%}
+  {% set v = (value if value is not none else 0) %}
+  {% if v < 0 %}
+    <span style="float:left;">(£</span>
+    <span style="float:right;">{{ "{:,.2f}".format(v|abs) }})</span>
+  {% else %}
+    <span style="float:left;">£</span>
+    <span style="float:right;">{{ "{:,.2f}".format(v) }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{# Running footers for ALL pages — must exist unconditionally #}
+<div class="footer-run footer-left"  style="position: running(footer-left);  font-size:8pt; color:rgb(6,27,55);">
+PO {{ "%06d"|format(po.po_number) if po and po.po_number else "" }}
+{% if po and po.current_revision %} • Rev {{ po.current_revision }}{% endif %}
+</div>
+
+<div class="footer-run footer-center" style="position: running(footer-center); font-size:8pt; color:rgb(6,27,55);">
+Page <span class="page-number"></span> of <span class="total-pages"></span>
+</div>
+
+<div class="footer-run footer-right" style="position: running(footer-right); font-size:8pt; color:rgb(6,27,55);">
+Printed: {{ now.strftime('%d %b %Y') }}
+</div>
+
 {% if po and po.get('id') %}
 
+  <!-- Header -->
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1em;">
     {% if logo_base64 %}
       <img src="data:image/png;base64,{{ logo_base64 }}" alt="Logo" style="height: 150px;">
@@ -11,104 +38,139 @@
       <img src="{{ url_for('static', filename='img/PSS_Standard_RGB.png') }}" alt="Logo" style="height: 150px;">
     {% endif %}
 
+    <span class="po-number" style="visibility:hidden">{{ "%06d"|format(po.get('po_number',0)) }}</span>
+
     <div style="text-align: right;">
       <h2 style="margin: 0;">Purchase Order</h2>
-      <p style="margin: 0;"><strong>PO Number:</strong> {{ "%06d"|format(po['po_number']) }}-{{ po['projects'].get('projectnumber', '') }}</p>
+      <p style="margin: 0;">
+        <strong>PO Number:</strong>
+        {{ "%06d"|format(po.get('po_number',0)) }}{% if po.get('projects') and po['projects'].get('projectnumber') %}-{{ po['projects'].get('projectnumber') }}{% endif %}
+      </p>
       <p style="margin: 0;"><strong>PO Date:</strong> {{ now.strftime('%d %b %Y') }}</p>
-      <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>
+      <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision','-') }}</p>
     </div>
   </div>
 
   <hr style="margin: 1em 0;">
 
+  <!-- Supplier / Delivery -->
+  {% set md = po.get('po_metadata') or {} %}
+  {% set sup = po.get('suppliers') or {} %}
+  {% set daddr = po.get('delivery_address') or {} %}
+  {% set dcont = po.get('delivery_contact') or delivery_contact or {} %}
+
   <div style="display: flex; justify-content: space-between; margin-top: 1em; gap: 2em;">
+    <!-- Supplier -->
     <div style="flex: 1;">
       <p style="margin: 0;"><strong>Supplier:</strong><br>
-      {% if po.get('suppliers') %}
-        {{ po['suppliers'].get('name', '') }}<br>
-        {{ po['suppliers'].get('address_line1', '') }}<br>
-        {{ po['suppliers'].get('address_line2', '') }}<br>
-        {{ po['suppliers'].get('postcode', '') }}
-      {% else %}
-        —
-      {% endif %}
-      </p>
-    </div>
-
-    <div style="flex: 1; text-align: right;">
-      <p style="margin: 0;"><strong>Delivery Address:</strong><br>
-      {% if po.get('manual_delivery_address') %}
-        <pre style="text-align: left;">{{ po.manual_delivery_address }}</pre>
-      {% elif po.get('delivery_address') %}
-        {{ po.delivery_contact.name }}<br>
-        {{ po.delivery_contact.phone }}<br>
-        {{ po.delivery_address.name }}<br>
-        {{ po.delivery_address.address_line1 }}<br>
-        {{ po.delivery_address.address_line2 }}<br>
-        {{ po.delivery_address.postcode }}
-      {% else %}
-        —
-      {% endif %}
+        {% if sup.get('name') %}{{ sup.get('name')|default('', true) }}<br>{% endif %}
+        {% if sup.get('address_line1') %}{{ sup.get('address_line1')|default('', true) }}<br>{% endif %}
+        {% if sup.get('address_line2') %}{{ sup.get('address_line2')|default('', true) }}<br>{% endif %}
+        {% if sup.get('postcode') %}{{ sup.get('postcode')|default('', true) }}{% endif %}
       </p>
 
-      {% if delivery_contact %}
-        <p style="margin: 0.5em 0 0 0;"><strong>Contact:</strong> {{ delivery_contact.name }}<br>
-        <strong>Phone:</strong> {{ delivery_contact.phone }}</p>
+      {% if md.get('delivery_date') %}
+        <p style="margin: .5em 0 0 0;">
+            <strong>Delivery Date:</strong> {{ md.get('delivery_date')|default('', true) }}
+        </p>
+      {% endif %}
+
+      {% if md.get('delivery_terms') %}
+            <strong>Delivery Terms:</strong> {{ md.get('delivery_terms')|default('', true) }}
       {% endif %}
     </div>
+
+    <!-- Delivery -->
+    <div style="margin-left: auto; text-align: left; width: fit-content; max-width: 60ch;">
+    <p style="margin: 0;">
+        <strong>Delivery Address:</strong><br>
+
+        {# Manual address takes priority #}
+        {% if po.get('manual_delivery_address') %}
+        <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">
+    {{ po.get('manual_delivery_address')|default('', true) }}</pre>
+
+        {# Otherwise use structured fields, printing only non-empty lines #}
+        {% elif daddr %}
+        {% if daddr.get('name') %}{{ daddr.get('name')|default('', true) }}<br>{% endif %}
+        {% if daddr.get('address_line1') %}{{ daddr.get('address_line1')|default('', true) }}<br>{% endif %}
+        {% if daddr.get('address_line2') %}{{ daddr.get('address_line2')|default('', true) }}<br>{% endif %}
+        {% if daddr.get('postcode') %}{{ daddr.get('postcode')|default('', true) }}{% endif %}
+        {% else %}
+        —
+        {% endif %}
+    </p>
+
+    {# Delivery Contact AFTER the address #}
+    {% if dcont.get('name') or dcont.get('phone') or dcont.get('email')
+            or md.get('manual_contact_name') or md.get('manual_contact_phone') or md.get('manual_contact_email') %}
+        <p style="margin: .5em 0 0 0;">
+        {% set cname = dcont.get('name') or md.get('manual_contact_name') %}
+        {% set cphone = dcont.get('phone') or md.get('manual_contact_phone') %}
+        {% set cemail = dcont.get('email') or md.get('manual_contact_email') %}
+
+        {% if cname %}<strong>Contact:</strong> {{ cname|default('', true) }}<br>{% endif %}
+        {% if cphone %}<strong>Phone:</strong> {{ cphone|default('', true) }}<br>{% endif %}
+        {% if cemail %}<strong>Email:</strong> {{ cemail|default('', true) }}{% endif %}
+        </p>
+    {% endif %}
+    </div>
+
   </div>
 
   <hr>
-  <h3>Line Items</h3>
 
-  {% if po.get('line_items') %}
-    <table>
-      <thead>
+    {% if po.get('line_items') %}
+    <table class="po-pdf-items">
+        <thead>
         <tr>
-          <th>Description</th>
-          <th>Qty</th>
-          <th>UOM</th>
-          <th style="text-align: right;">Unit Price</th>
-          <th style="text-align: right;">Total</th>
+            <th class="col-idx">Item</th>
+            <th class="col-desc">Description</th>
+            <th class="col-qty">Qty</th>
+            <th class="col-unit">Unit</th>
+            <th class="col-price num">Unit Price</th>
+            <th class="col-total num">Total</th>
         </tr>
-      </thead>
-      <tbody>
+        </thead>
+        <tbody>
         {% for item in po['line_items'] %}
-        <tr>
-          <td>{{ item.get('description') }}</td>
-          <td>{{ item.get('quantity') }}</td>
-          <td>{{ item.get('unit') }}</td>
-          <td style="text-align: right;">£{{ "{:,.2f}".format(item.unit_price) }}</td>
-          <td style="text-align: right;">£{{ "{:,.2f}".format(item.total) }}</td>
-        </tr>
+            {% set qty = item.get('quantity') or 0 %}
+            {% set unit_price = item.get('unit_price') or 0 %}
+            {% set line_total = item.get('total') if item.get('total') is not none else (qty * unit_price) %}
+            <tr>
+            <td class="center">{{ loop.index }}</td>
+            <td class="wrap">{{ item.get('description')|default('', true) }}</td>
+            <td class="center">{{ "{:,.0f}".format(qty) }}</td>
+            <td>{{ item.get('unit')|default('', true) }}</td>
+            <td class="num">{{ money_cell(unit_price) }}</td>
+            <td class="num">{{ money_cell(line_total) }}</td>
+            </tr>
         {% endfor %}
-      </tbody>
-      <tfoot>
+        </tbody>
+        <tfoot>
         <tr>
-          <td colspan="4" style="text-align: right; font-weight: bold;">Net Total</td>
-          <td style="text-align: right; font-weight: bold;">£{{ "{:,.2f}".format(net_total) }}</td>
+            <td colspan="5" class="num" style="font-weight: bold;">Net Total</td>
+            <td class="num" style="font-weight: bold;">{{ money_cell(net_total or 0) }}</td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align: right;">VAT</td>
-          <td style="text-align: right;">£{{ "{:,.2f}".format(vat_total) }}</td>
+            <td colspan="5" class="num">VAT</td>
+            <td class="num">{{ money_cell(vat_total or 0) }}</td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align: right; font-weight: bold;">Grand Total</td>
-          <td style="text-align: right; font-weight: bolder;">£{{ "{:,.2f}".format(grand_total) }}</td>
+            <td colspan="5" class="num" style="font-weight: bold;">Grand Total</td>
+            <td class="num" style="font-weight: bolder;">{{ money_cell(grand_total or 0) }}</td>
         </tr>
-      </tfoot>
+        </tfoot>
     </table>
 
-    <div class="footer-left">Power System Services</div>
-    <div class="footer-center">
-    Page <span class="page-number"></span> of <span class="total-pages"></span>
-    </div>
-    <div class="footer-right">PO #{{ '%06d' % po['po_number'] }}</div>
+    {% if include_certs_table %}
+        {% include "partials/certs_table.html" %}
+    {% endif %}
 
 
-  {% else %}
+    {% else %}
     <p>No line items available.</p>
-  {% endif %}
+    {% endif %}
 
 {% else %}
   <p>PO not found.</p>

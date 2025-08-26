@@ -1,0 +1,16 @@
+[
+  {"product": "Structural Steel: I & H Sections, Channels, Angles, Plates, Bars & Rods", "standard": "EN 10025-2", "documentation": "Type 3.1"},
+  {"product": "Structural Steel: Hollow Sections", "standard": "EN 10210-1", "documentation": "Type 3.1"},
+  {"product": "Cold Formed: Welded Hollow Sections", "standard": "EN 10219-1", "documentation": "Type 3.1"},
+  {"product": "Structural Steel: I & H Sections, Channels, Angles, Plates, Bars & Rods & Hollow Sections", "standard": "EN 10088-2", "documentation": "Type 3.1"},
+  {"product": "Structural Bolting Assemblies", "standard": "EN 15048-1", "documentation": "Type 2.1"},
+  {"product": "Welding Wire (MAG): Non Alloy and Fine Grain Steels", "standard": "EN ISO 14341", "documentation": "Type 2.2"},
+  {"product": "Welding Electrodes (MMA): Non Alloys and Fine Grain Steels", "standard": "EN ISO 2560", "documentation": "Type 2.2"},
+  {"product": "Welding Wire (MAG): Stainless Steel", "standard": "EN 10204", "documentation": "Type 3.1"},
+  {"product": "Welding Gases", "standard": "EN ISO 14175", "documentation": "Type 2.2"},
+  {"product": "Steel Painting", "standard": "EN ISO 12944-7", "documentation": "Supplier Report*"},
+  {"product": "Steel Galvanising", "standard": "EN ISO 1461", "documentation": "Supplier Report*"},
+  {"product": "Thermal Cutting", "standard": "BS EN 1090-2/3834-2", "documentation": "Supplier Report*"},
+  {"product": "Design", "standard": "EN 1993 - (All Parts)", "documentation": "Supplier Report*"},
+  {"product": "Stainless Steel Sections, Flat, RSA and Bar", "standard": "EN 10088-3", "documentation": "Type 3.1"}
+]

@@ -1,37 +1,36 @@
-FROM python:3.11-slim
+# Dev image (Windows-friendly) with WeasyPrint runtime libs
+FROM python:3.11-slim-bookworm
 
-# System packages for WeasyPrint and other tools
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libffi-dev \
-    libssl-dev \
-    libjpeg-dev \
-    libpq-dev \
-    libpangocairo-1.0-0 \
-    libpangoft2-1.0-0 \
-    libcairo2 \
-    libxml2 \
-    libxslt1.1 \
-    libfontconfig1 \
-    libglib2.0-0 \
-    && apt-get clean
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Create app directory
 WORKDIR /app
 
-# Install Python dependencies
+# --- WeasyPrint native dependencies ---
+# cairo, pango, gdk-pixbuf, GLib/GObject, HarfBuzz, plus common fonts & XML libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libpangoft2-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libglib2.0-0 \
+    libharfbuzz0b \
+    libffi-dev \
+    libxml2 \
+    libxslt1.1 \
+    shared-mime-info \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-core \
+ && rm -rf /var/lib/apt/lists/*
+
+# Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app code
+# App code
 COPY . .
-COPY app/static /app/static
 
-# Set environment variables
-ENV FLASK_ENV=development
-ENV FLASK_DEBUG=1
-ENV PYTHONUNBUFFERED=1
-
-# Run the Flask app
-
-CMD ["flask", "run", "--host=0.0.0.0"]
+# No CMD here — compose supplies the dev command (flask run)

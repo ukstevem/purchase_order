@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  web:
+    build:
+      context: .
+      dockerfile: dockerfileforpi   # <-- use the Pi/Gunicorn Dockerfile
+      # Match your Pi OS:
+      platforms:
+        - linux/arm64/v8            # 64-bit Pi OS (aarch64)
+      # - linux/arm/v7              # 32-bit Pi OS
+    env_file: .env
+    # If you use a factory, keep this; otherwise override with command below.
+    environment:
+      - PORT=8000
+      # Pick ONE of these to match your app entrypoint:
+      # - GUNICORN_APP=app:create_app()
+      # - GUNICORN_APP=wsgi:app
+      # - GUNICORN_APP=app:app
+      - GUNICORN_APP=app:create_app()
+    ports:
+      - "8000:8000"
+    volumes:
+      # Only persist data/outputs (don’t bind-mount source in prod)
+      - ./instance:/app/instance
+      - ./output:/app/output
+      # Optional: save PDFs to a host/network share mounted on the Pi
+      # - /mnt/po_share:/mnt/share:rw
+    restart: unless-stopped
+    # If your Dockerfile CMD is ["gunicorn","-b","0.0.0.0:8000","app:create_app()"]
+    # you can instead override here using the env var:
+    command: >
+      sh -c 'gunicorn -b 0.0.0.0:8000 "${GUNICORN_APP}"'

@@ -6,13 +6,34 @@ from app.supabase_client import fetch_all_pos, fetch_active_pos
 from app.utils.status_utils import POStatus, validate_po_status
 from app.utils.revision import compute_updated_revision
 from weasyprint import HTML, CSS
-from datetime import datetime
-from flask import current_app
-import requests
-import base64
+from datetime import datetime, date
+from flask import current_app, render_template, request, session
+from .utils.certs_table import load_certs_table
+import base64, uuid
 from pathlib import Path
 
 main = Blueprint("main", __name__)
+
+# boolean and string normalisation helper
+
+def _f(name, default=None):
+    return (request.form.get(name) or default)
+
+def _f_bool(name):
+    # checkboxes come as "on" or missing
+    return request.form.get(name) in ("on", "true", "True", "1")
+
+def _active_po_metadata(po) -> dict:
+    """Return a dict for the active metadata, or {} if missing."""
+    pm = po.get("po_metadata")
+    if not pm:
+        return {}
+    if isinstance(pm, dict):
+        return pm
+    if isinstance(pm, list):
+        # prefer the active row; otherwise last one
+        return next((m for m in pm if m.get("active")), (pm[-1] if pm else {}))
+    return {}
 
 @main.errorhandler(404)
 def page_not_found(e):
@@ -72,41 +93,67 @@ def po_preview(po_id):
 def create_po():
     if request.method == "POST":
         try:
+            # 🔒 Idempotency: verify one-shot token
+            idem = request.form.get("idempotency_key")
+            if not idem or idem != session.pop("last_form_token", None):
+                flash("This form was already submitted or the token is invalid.", "warning")
+                return redirect(url_for("main.create_po"))
+            
             metadata, line_items = parse_po_form(request.form)
+            metadata["test_certificates_required"] = _f_bool("test_cert_required")
             metadata["status"] = "draft"
             metadata["current_revision"] = "a"
 
-            # Handle delivery address (existing logic)
-            address_id = request.form.get("delivery_address_id")
-            manual_address = request.form.get("manual_delivery_address", "").strip()
+            # 🚫 No manual delivery address allowed
+            manual_address_text = (request.form.get("manual_delivery_address") or "").strip()
+            if manual_address_text:
+                flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
+                return redirect(url_for("main.create_po"))
 
-            if address_id == "manual":
-                metadata["delivery_address_id"] = None
-                metadata["manual_delivery_address"] = manual_address
-            else:
-                metadata["delivery_address_id"] = address_id
-                metadata["manual_delivery_address"] = None
+            delivery_address_id = request.form.get("delivery_address_id") or None
+            if delivery_address_id == "manual":
+                # user somehow picked the manual option in UI
+                flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
+                return redirect(url_for("main.create_po"))
 
-            # Handle delivery contact (with manual option)
-            delivery_contact_id = request.form.get("delivery_contact_id")
+            delivery_contact_id = request.form.get("delivery_contact_id") or None
+
+            # ===== Contact rules =====
             if delivery_contact_id == "manual":
-                delivery_contact_id = None
-                manual_contact_name = request.form.get("manual_contact_name", "").strip()
+                # Must have a dropdown-selected address to satisfy FK on delivery_contacts.address_id
+                if not delivery_address_id:
+                    flash("Select a Delivery Address from the dropdown before adding a manual contact.", "danger")
+                    return redirect(url_for("main.create_po"))
+
+                manual_contact_name = (request.form.get("manual_contact_name") or "").strip()
                 if not manual_contact_name:
                     flash("Manual contact name is required when manual contact is selected.", "danger")
                     return redirect(url_for("main.create_po"))
-                
-                # Store manual contact data in metadata
-                metadata["manual_contact_name"] = manual_contact_name
-                metadata["manual_contact_phone"] = request.form.get("manual_contact_phone", "").strip()
-                metadata["manual_contact_email"] = request.form.get("manual_contact_email", "").strip()
+
+                metadata["manual_contact_name"]  = manual_contact_name
+                metadata["manual_contact_phone"] = (request.form.get("manual_contact_phone") or "").strip()
+                metadata["manual_contact_email"] = (request.form.get("manual_contact_email") or "").strip()
+                metadata["delivery_contact_id"]  = None  # will be created in insert_po_bundle
             else:
-                # Clear manual contact data if not using manual option
-                metadata["manual_contact_name"] = None
+                # Existing contact selected (UUID) or none
+                if delivery_contact_id:
+                    # Align address to contact’s address_id to keep data consistent
+                    contacts = fetch_delivery_contacts()
+                    sel = next((c for c in contacts if c.get("id") == delivery_contact_id), None)
+                    if not sel:
+                        flash("Selected delivery contact not found.", "danger")
+                        return redirect(url_for("main.create_po"))
+                    # Force address to match the contact
+                    delivery_address_id = sel.get("address_id") or delivery_address_id
+                # Clear manual fields
+                metadata["manual_contact_name"]  = None
                 metadata["manual_contact_phone"] = None
                 metadata["manual_contact_email"] = None
+                metadata["delivery_contact_id"]  = delivery_contact_id or None
 
-            metadata["delivery_contact_id"] = delivery_contact_id
+            # Persist only dropdown address (or None). No manual text!
+            metadata["delivery_address_id"] = delivery_address_id
+            metadata["manual_delivery_address"] = None
 
             po_id = insert_po_bundle(metadata)
             for item in line_items:
@@ -127,6 +174,10 @@ def create_po():
 
     projects_sorted = sorted(projects, key=lambda p: int(p['projectnumber']), reverse=True)
 
+    idempotency_key = str(uuid.uuid4())
+    session['last_form_token'] = idempotency_key
+
+
     return render_template(
         "po_form.html",
         mode="create",
@@ -135,9 +186,9 @@ def create_po():
         suppliers=suppliers,
         projects=projects_sorted,
         delivery_addresses=delivery_addresses,
-        delivery_contacts=delivery_contacts
+        delivery_contacts=delivery_contacts,
+        idempotency_key=idempotency_key,
     )
-
 
 @main.route("/edit-po/<po_id>", methods=["GET", "POST"])
 def edit_po(po_id):
@@ -148,13 +199,22 @@ def edit_po(po_id):
         insert_line_items,
         fetch_projects,
         fetch_suppliers,
+        fetch_delivery_addresses,   # ✅ needed in GET render
+        fetch_delivery_contacts,    # ✅ needed in GET render
     )
-    from .utils.revision import get_next_revision
+    from .utils.revision import get_next_revision, compute_updated_revision  # ✅ import compute_updated_revision
     from .utils.status_utils import validate_po_status, POStatus
 
+    # ---------------- POST: create a new revision ----------------
     if request.method == "POST":
         try:
-            # 1. Fetch the existing PO
+            # 🔒 Idempotency: verify one-shot token
+            idem = request.form.get("idempotency_key")
+            if not idem or idem != session.pop("last_form_token", None):
+                flash("This form was already submitted or the token is invalid.", "warning")
+                return redirect(url_for("main.edit_po", po_id=po_id))
+            
+            # 1) Fetch the existing PO
             po = fetch_po_detail(po_id)
             if not po:
                 flash("Original PO not found.", "danger")
@@ -164,56 +224,85 @@ def edit_po(po_id):
                 flash("❌ This PO is marked as complete or cancelled and cannot be edited.", "warning")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
-            # 2. Parse form and validate status
+            # 2) Parse form, validate status transition, and resolve delivery address/contact
             new_status = request.form.get("status", "draft").lower()
             if po["status"] != "draft" and new_status == "draft":
                 flash("❌ You cannot revert an approved PO back to draft.", "danger")
                 return redirect(url_for("main.edit_po", po_id=po_id))
-
             validate_po_status(new_status)
 
             current_status = po.get("status", "draft").lower()
-            current_rev = po.get("current_revision", "a")
+            current_rev    = po.get("current_revision", "a")
 
-            # 3. Deactivate current revision
-            deactivate_po_data(po_id)
-
-            # 4. Parse metadata and line items
+            # Parse form now (we'll also resolve delivery address / contact here)
             metadata, line_items = parse_po_form(request.form)
+            metadata["test_certificates_required"] = _f_bool("test_cert_required")
 
-            # 5. Handle delivery contact (with manual option)
-            delivery_contact_id = request.form.get("delivery_contact_id")
+            # 🚫 No manual delivery address allowed
+            manual_address_text = (request.form.get("manual_delivery_address") or "").strip()
+            if manual_address_text:
+                flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
+                return redirect(url_for("main.edit_po", po_id=po_id))
+
+            delivery_address_id = request.form.get("delivery_address_id") or None
+            if delivery_address_id == "manual":
+                flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
+                return redirect(url_for("main.edit_po", po_id=po_id))
+
+            # Handle delivery contact selection
+            delivery_contact_id = request.form.get("delivery_contact_id") or None
             if delivery_contact_id == "manual":
-                delivery_contact_id = None
-                manual_contact_name = request.form.get("manual_contact_name", "").strip()
+                # Must have a dropdown-selected address to satisfy FK on delivery_contacts.address_id
+                if not delivery_address_id:
+                    flash("Select a Delivery Address from the dropdown before adding a manual contact.", "danger")
+                    return redirect(url_for("main.edit_po", po_id=po_id))
+
+                manual_contact_name = (request.form.get("manual_contact_name") or "").strip()
                 if not manual_contact_name:
                     flash("Manual contact name is required when manual contact is selected.", "danger")
                     return redirect(url_for("main.edit_po", po_id=po_id))
-                
-                # Store manual contact data in metadata
-                metadata["manual_contact_name"] = manual_contact_name
-                metadata["manual_contact_phone"] = request.form.get("manual_contact_phone", "").strip()
-                metadata["manual_contact_email"] = request.form.get("manual_contact_email", "").strip()
+
+                metadata["manual_contact_name"]  = manual_contact_name
+                metadata["manual_contact_phone"] = (request.form.get("manual_contact_phone") or "").strip()
+                metadata["manual_contact_email"] = (request.form.get("manual_contact_email") or "").strip()
+                metadata["delivery_contact_id"]  = None  # will be created in insert_po_bundle if needed
+                metadata["idempotency_key"] = idem
             else:
-                # Clear manual contact data if not using manual option
-                metadata["manual_contact_name"] = None
+                # Existing contact selected (UUID) or none
+                if delivery_contact_id:
+                    # Align address to the selected contact’s address_id to keep data consistent
+                    contacts = fetch_delivery_contacts()
+                    sel = next((c for c in contacts if c.get("id") == delivery_contact_id), None)
+                    if not sel:
+                        flash("Selected delivery contact not found.", "danger")
+                        return redirect(url_for("main.edit_po", po_id=po_id))
+                    # Force address to match the contact
+                    delivery_address_id = sel.get("address_id") or delivery_address_id
+
+                # Clear manual fields
+                metadata["manual_contact_name"]  = None
                 metadata["manual_contact_phone"] = None
                 metadata["manual_contact_email"] = None
+                metadata["delivery_contact_id"]  = delivery_contact_id or None
 
-            # 6. Prepare updated metadata
-            metadata["project_id"] = po["project_id"]
-            metadata["supplier_id"] = po["supplier_id"]
-            metadata["po_number"] = po["po_number"]
-            metadata["status"] = new_status
-            metadata["current_revision"] = compute_updated_revision(
-                current_rev,
-                current_status,
-                new_status,
-            )
-            metadata["delivery_address_id"] = request.form.get("delivery_address_id") or None
-            metadata["delivery_contact_id"] = delivery_contact_id
+            # Persist only dropdown address (or None). No manual text!
+            metadata["delivery_address_id"]   = delivery_address_id
+            metadata["manual_delivery_address"] = None
 
-            # 7. Insert new PO + items
+
+            # 3) Deactivate current revision data rows
+            deactivate_po_data(po_id)
+
+            # 4. Prepare updated metadata
+            metadata["project_id"]          = po["project_id"]
+            metadata["supplier_id"]         = po["supplier_id"]
+            metadata["po_number"]           = po["po_number"]
+            metadata["status"]              = new_status
+            metadata["current_revision"]    = compute_updated_revision(current_rev, current_status, new_status)
+            metadata["delivery_address_id"] = delivery_address_id
+            metadata["manual_delivery_address"] = None
+
+            # 5) Insert new PO + items
             new_po_id = insert_po_bundle(metadata)
             for item in line_items:
                 item["po_id"] = new_po_id
@@ -228,39 +317,41 @@ def edit_po(po_id):
             flash(f"Error creating revision: {e}", "danger")
             return redirect(url_for("main.edit_po", po_id=po_id))
 
-    # GET request section
+    # ---------------- GET: render edit form ----------------
     po = fetch_po_detail(po_id)
     if not po:
         return render_template("404.html"), 404
 
-    # Extract delivery information
+    # ✅ Safely get active metadata (handles None, list, or dict)
+    po_metadata = _active_po_metadata(po)
+
+    # Linked objects (may be None if not expanded by your fetch)
     delivery_contact = po.get("delivery_contact")
     delivery_address = po.get("delivery_address")
-    po_metadata = po.get("po_metadata", {})
 
-    print(f"DEBUG - Original delivery_address: {delivery_address}")
-    print(f"DEBUG - Original delivery_contact: {delivery_contact}")
-
-    # Handle delivery address ID
+    # Resolve delivery_address_id
     delivery_address_id = None
-    if delivery_address:
+    if isinstance(delivery_address, dict) and delivery_address.get("id"):
         delivery_address_id = delivery_address.get("id")
-    elif delivery_contact and delivery_contact.get("address_id"):
+    elif isinstance(delivery_contact, dict) and delivery_contact.get("address_id"):
         delivery_address_id = delivery_contact.get("address_id")
 
-    # Handle delivery contact ID and manual contact data
-    delivery_contact_id = None
-    manual_contact_name = po_metadata.get("manual_contact_name", "")
-    manual_contact_phone = po_metadata.get("manual_contact_phone", "")
-    manual_contact_email = po_metadata.get("manual_contact_email", "")
+    # Manual contact values from metadata (safe defaults)
+    manual_contact_name  = (po_metadata.get("manual_contact_name")  or "")
+    manual_contact_phone = (po_metadata.get("manual_contact_phone") or "")
+    manual_contact_email = (po_metadata.get("manual_contact_email") or "")
 
-    if delivery_contact:
-        delivery_contact_id = delivery_contact.get("id")
+    # If metadata empty but a delivery_contact exists, optionally prefill from it
+    if not (manual_contact_name or manual_contact_phone or manual_contact_email):
+        if isinstance(delivery_contact, dict):
+            manual_contact_name  = (delivery_contact.get("name")  or manual_contact_name)
+            manual_contact_phone = (delivery_contact.get("phone") or manual_contact_phone)
+            manual_contact_email = (delivery_contact.get("email") or manual_contact_email)
 
-    print(f"DEBUG - Resolved delivery_address_id: {delivery_address_id}")
-    print(f"DEBUG - Resolved delivery_contact_id: {delivery_contact_id}")
-    print(f"DEBUG - Manual contact data: {manual_contact_name}, {manual_contact_phone}, {manual_contact_email}")
+    # Resolve delivery_contact_id (if relation expanded)
+    delivery_contact_id = delivery_contact.get("id") if isinstance(delivery_contact, dict) else None
 
+    # Build po_data for template
     po_data = {
         "project_id": po["project_id"],
         "supplier_id": po["supplier_id"],
@@ -280,6 +371,10 @@ def edit_po(po_id):
         "manual_contact_email": manual_contact_email,
     }
 
+    # Generate a one-shot token for the edit form
+    idempotency_key = str(uuid.uuid4())
+    session['last_form_token'] = idempotency_key
+
     return render_template(
         "po_form.html",
         mode="edit",
@@ -289,8 +384,10 @@ def edit_po(po_id):
         projects=fetch_projects(),
         suppliers=fetch_suppliers(),
         delivery_contacts=fetch_delivery_contacts(),
-        delivery_addresses=fetch_delivery_addresses()
+        delivery_addresses=fetch_delivery_addresses(),
+        idempotency_key=idempotency_key,
     )
+
 
 @main.route("/po/<po_id>/pdf")
 def po_pdf(po_id):
@@ -323,6 +420,8 @@ def po_pdf(po_id):
     with open(logo_path, "rb") as img_file:
         logo_base64 = base64.b64encode(img_file.read()).decode("utf-8")
 
+    certs_table = load_certs_table()
+
     # Render template
     html = render_template(
         "po_pdf.html",
@@ -332,7 +431,9 @@ def po_pdf(po_id):
         grand_total=grand_total,
         now=datetime.now(),
         logo_base64=logo_base64,
-        pdf=True
+        pdf=True,
+        certs_table=certs_table,
+        include_certs_table=True
     )
 
     # Generate PDF
@@ -344,3 +445,5 @@ def po_pdf(po_id):
     response.headers["Content-Type"] = "application/pdf"
     response.headers["Content-Disposition"] = f"inline; filename=PO_{po['po_number']}.pdf"
     return response
+
+
