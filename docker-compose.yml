@@ -5,7 +5,7 @@ services:
     container_name: po_system
     build:
       context: .                # repo root
-      dockerfile: Dockerfileforpi
+      dockerfile: DockerfileforPi
       platforms:
         - linux/arm64/v8        # Raspberry Pi 64-bit OS
         # - linux/arm/v7        # Uncomment if using 32-bit Pi OS
