@@ -11,10 +11,10 @@ services:
         # - linux/arm/v7        # Uncomment if using 32-bit Pi OS
     environment:
       # Fill these in Portainer's "Env" tab (recommended). Examples:
-      SUPABASE_URL: https://hguvsjpmiyeypfcuvvko.supabase.co
-      SUPABASE_KEY: "your-key"
-      SECRET_KEY: "your-secret"
-      FLASK_ENV: "production"
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      FLASK_ENV: ${FLASK_ENV:-production}
       # FLASK_DEBUG: "0"
       # PREFERRED_URL_SCHEME: http
     ports:
