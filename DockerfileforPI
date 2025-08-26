@@ -1,12 +1,18 @@
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# WeasyPrint native deps (cairo/pango/gdk-pixbuf/glib/etc.) + fonts
+# System deps
+# - WeasyPrint needs Cairo/Pango/GDK-Pixbuf/GLib stacks
+# - librsvg2-2: SVG rendering (logos/icons in PDFs)
+# - ca-certificates: HTTPS to Supabase
+# - fonts: decent defaults; add more as needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     build-essential \
     libcairo2 \
     libpango-1.0-0 \
@@ -18,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libxml2 \
     libxslt1.1 \
+    librsvg2-2 \
     shared-mime-info \
     fonts-dejavu-core \
     fonts-liberation \
@@ -26,11 +33,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 # App
 COPY . .
 
-# Gunicorn (run.py defines `app = create_app()`, so target is run:app)
+# Gunicorn
 ENV PORT=8000
-CMD ["gunicorn","-b","0.0.0.0:8000","-w","2","--timeout","120","run:app"]
+EXPOSE 8000
+CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--timeout", "120", "run:app"]
