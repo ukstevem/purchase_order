@@ -41,7 +41,11 @@ def page_not_found(e):
 
 @main.route("/")
 def index():
-    return {"message": "PO System running"}
+    return render_template("index.html")
+
+@main.route("/home")
+def home_redirect():
+    return redirect(url_for("main.index"))
 
 @main.route("/po-list")
 def po_list():

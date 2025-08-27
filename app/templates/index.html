@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Purchase Order System{% endblock %}
+
+{% block content %}
+<div style="text-align: center; margin-top: 3em;">
+  <h1>📑 Purchase Order System</h1>
+  <p>Welcome to the internal PO system.</p>
+  
+  <div style="margin-top: 2em;">
+    <a href="{{ url_for('main.po_list') }}" class="btn">📋 View POs</a>
+    <a href="{{ url_for('main.create_po') }}" class="btn">➕ Create New PO</a>
+  </div>
+</div>
+{% endblock %}
