@@ -376,42 +376,39 @@ def fetch_all_po_revisions(po_number: int):
 
 def fetch_project_po_summary():
     """
-    Returns:
-      [
-        {"project": "P123 — New HQ", "projectnumber": "P123", "draft": 2, "active": 5},
-        ...
-      ]
-    Active = anything not 'draft' (approved, released, issued, etc.)
+    Build dashboard counts from active_po_list (already filtered to current/active rows).
+    Treat anything not 'draft' as active (approved/released/issued/etc.).
+    Returns: [{project: "P123", projectnumber: "P123", draft: 1, active: 2}, ...]
     """
-    url = f"{current_app.config['SUPABASE_URL']}/rest/v1/purchase_orders"
+    base = current_app.config["SUPABASE_URL"]
+    url = f"{base}/rest/v1/active_po_list"
     params = {
-        # relies on FK so we can pull projectnumber/description inline
-        "select": "status,project_id,projects(projectnumber,projectdescription)"
+        "select": "projectnumber,status"
     }
     resp = requests.get(url, headers=get_headers(), params=params)
-    resp.raise_for_status()
-    rows = resp.json() or []
 
+    # Helpful error log if Supabase rejects the request
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+        except Exception:
+            err = {"body": resp.text}
+        current_app.logger.error("❌ active_po_list fetch failed %s: %s", resp.status_code, err)
+    resp.raise_for_status()
+
+    rows = resp.json() or []
     agg = defaultdict(lambda: {"project": "", "projectnumber": "", "draft": 0, "active": 0})
 
     for r in rows:
-        pj = (r.get("projects") or {})
-        projectnumber = pj.get("projectnumber") or "—"
-        projectdesc   = pj.get("projectdescription") or ""
-        key = projectnumber
-
-        if not agg[key]["project"]:
-            title = projectnumber
-            if projectdesc:
-                title = f"{projectnumber} — {projectdesc}"
-            agg[key]["project"] = title
-            agg[key]["projectnumber"] = projectnumber
+        projectnumber = (r.get("projectnumber") or "—").strip()
+        if not agg[projectnumber]["project"]:
+            agg[projectnumber]["project"] = projectnumber
+            agg[projectnumber]["projectnumber"] = projectnumber
 
         status = (r.get("status") or "").lower()
         if status == "draft":
-            agg[key]["draft"] += 1
+            agg[projectnumber]["draft"] += 1
         else:
-            agg[key]["active"] += 1
+            agg[projectnumber]["active"] += 1
 
-    # stable ordering by projectnumber
     return sorted(agg.values(), key=lambda x: x["projectnumber"])
