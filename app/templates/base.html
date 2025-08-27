@@ -3,31 +3,68 @@
 <head>
   <meta charset="UTF-8">
   <title>{% block title %}PSS Purchase Orders{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   {% if not pdf %}
-  <nav class="navbar">
-    <div class="nav-container">
-      <a href="{{ url_for('main.po_list') }}">PO List</a>
-      <a href="{{ url_for('main.create_po') }}">Create PO</a>
-    </div>
-  </nav>
-  {% endif %}
-  <div class="container">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <ul>
-        {% for category, message in messages %}
-          <li class="flash {{ category }}">{{ message }}</li>
-        {% endfor %}
-        </ul>
-      {% endif %}
-    {% endwith %}
+  <div class="page-shell">
+    <header class="navbar">
+      <div class="nav-container">
+        <a class="brand" href="{{ url_for('main.po_list') }}">
+          <img src="{{ url_for('static', filename='img/pss_standard_rgb.png') }}" 
+               alt="PSS Logo" class="brand-logo">
+        </a>
 
-    {% block content %}{% endblock %}
+        <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+          <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+        </button>
+
+        <nav class="nav-links" data-collapsible>
+          <a class="nav-link {% if request.endpoint == 'main.home_redirect' or request.path == '/' %}active{% endif %}" 
+             href="{{ url_for('main.home_redirect') }}">Dashboard</a>
+
+          <a class="nav-link {% if request.endpoint == 'main.po_list' %}active{% endif %}" 
+             href="{{ url_for('main.po_list') }}">PO List</a>
+
+          <a class="nav-link {% if request.endpoint == 'main.create_po' %}active{% endif %}" 
+             href="{{ url_for('main.create_po') }}">Create PO</a>
+        </nav>
+      </div>
+    </header>
+  </div>
+  {% endif %}
+
+  <div class="page-shell">
+    <div class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul class="flash-list">
+          {% for category, message in messages %}
+            <li class="flash {{ category }}">{{ message }}</li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
   </div>
 
+  {% if not pdf %}
+  <script>
+    (function () {
+      const toggler = document.querySelector('.nav-toggle');
+      const menu = document.querySelector('.nav-links');
+      if (toggler && menu) {
+        toggler.addEventListener('click', () => {
+          const expanded = toggler.getAttribute('aria-expanded') === 'true';
+          toggler.setAttribute('aria-expanded', String(!expanded));
+          menu.classList.toggle('open');
+        });
+      }
+    })();
+  </script>
+  {% endif %}
 </body>
-</html>

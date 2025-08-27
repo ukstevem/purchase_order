@@ -1,8 +1,35 @@
+/* =========================================
+   PSS Styles (Merged: Base + Navbar Upgrade)
+   ========================================= */
+
 /* ==== Global Variables ==== */
 :root {
+  /* Existing brand vars */
   --pss-dark-blue: rgb(6, 27, 55);
   --pss-light-blue: rgb(151, 202, 235);
   --font-main: 'Montserrat', Arial, sans-serif;
+
+  /* Navbar/theme vars */
+  --nav-bg: #ffffff;
+  --nav-fg: var(--pss-dark-blue);
+  --nav-accent: #1f6feb;
+  --nav-muted: #6b7a90;
+  --nav-border: rgba(0,0,0,0.06);
+  --btn-fg: #ffffff;
+  --shadow: 0 6px 20px rgba(0,0,0,0.08);
+  --container-w: 1000px; /* match your existing container width */
+}
+
+/* Dark theme overrides */
+.theme-dark {
+  --nav-bg: #0f172a;
+  --nav-fg: #e2e8f0;
+  --nav-accent: #60a5fa;
+  --nav-muted: #94a3b8;
+  --nav-border: rgba(255,255,255,0.08);
+  --btn-fg: #0b1220;
+  background: #0b1220;
+  color: var(--nav-fg);
 }
 
 /* ==== Base Styling ==== */
@@ -14,8 +41,13 @@ body {
   color: var(--pss-dark-blue);
 }
 
+/* Make room for sticky navbar on small screens when needed */
+@media (max-width: 860px) {
+  body { padding-top: 0.5rem; }
+}
+
 .container {
-  max-width: 1000px;
+  max-width: var(--container-w);
   margin: 0 auto;
   background: white;
   padding: 2rem;
@@ -47,12 +79,21 @@ p {
   text-decoration: none;
   border-radius: 4px;
   font-weight: bold;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, filter 0.2s ease;
 }
 
 .btn:hover {
   background-color: var(--pss-light-blue);
   color: var(--pss-dark-blue);
+}
+
+/* Navbar-specific primary button style */
+.btn-primary {
+  background: var(--nav-accent);
+  color: var(--btn-fg) !important;
+}
+.btn-primary:hover {
+  filter: brightness(1.05);
 }
 
 /* ==== Table Styling ==== */
@@ -104,52 +145,40 @@ label {
 }
 
 /* ==== Utility ==== */
-.text-right {
-  text-align: right;
-}
+.text-right { text-align: right; }
+.text-center { text-align: center; }
 
-.text-center {
-  text-align: center;
-}
-
-/* ==== Media ==== */
-
+/* ==== Print (PDF) ==== */
 @media print {
   body {
     background: white;
     color: black;
     font-size: 11px;
+    padding: 0; /* remove body padding for print */
   }
 
   .container {
     box-shadow: none;
     padding: 0;
+    border-radius: 0;
   }
 
-  .btn,
-  .noprint {
+  .btn, .noprint, .navbar { /* hide interactive nav/controls */
     display: none !important;
   }
 
-  table {
-    font-size: 10px;
-  }
-
-  th, td {
-    border: 1px solid #000;
-  }
+  table { font-size: 10px; }
+  th, td { border: 1px solid #000; }
 }
 
+/* ==== Layout Bits ==== */
 .delivery-block {
-  float: right;            /* pushes the whole block to the right side */
-  text-align: left;        /* keeps the lines left-aligned inside */
-  margin-left: 2rem;       /* optional spacing from content on the left */
+  float: right;            /* block to the right */
+  text-align: left;        /* keep lines left-aligned */
+  margin-left: 2rem;       /* spacing from left content */
 }
-
 
 /* ==== Line Items Table ==== */
-
-
 table.line-items {
   width: 100%;
   border-collapse: collapse;
@@ -194,26 +223,19 @@ table.line-items tfoot td {
   background-color: #f5f5f5;
 }
 
-table.line-items tfoot td.total-label {
-  text-align: right;
-}
-
+table.line-items tfoot td.total-label { text-align: right; }
 table.line-items tfoot td.total-value {
   text-align: right;
-  font-variant-numeric: tabular-nums; /* makes digits align neatly */
+  font-variant-numeric: tabular-nums; /* neatly aligned digits */
   white-space: nowrap;
 }
+table.line-items tfoot td.total-value .currency { float: left; }
 
-table.line-items tfoot td.total-value .currency {
-  float: left;
-}
-
-/* Center align action buttons in line items table */
+/* Center action buttons in line items table */
 table.line-items td.actions {
   text-align: center;
   vertical-align: middle;
 }
-
 table.line-items td.actions button {
   margin: 0 auto;
   display: inline-block;
@@ -225,27 +247,10 @@ table.line-items td.actions button {
   gap: 1rem;              /* space between columns */
   align-items: flex-end;  /* align labels+inputs neatly */
 }
+.form-col { flex: 1; }
+.form-col.narrow { flex: 0 0 250px; } /* fixed width for short fields */
 
-.form-col {
-  flex: 1;                /* grow equally */
-}
-
-.form-col.narrow {
-  flex: 0 0 250px;        /* fixed width for shorter fields if needed */
-}
-
-.form-row {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-end;
-}
-.form-col {
-  flex: 1;
-}
-
-select {
-  height: 36px;
-}
+select { height: 36px; }
 
 /* ==== Line Items: numeric money cells ==== */
 table.line-items td.money {
@@ -253,14 +258,10 @@ table.line-items td.money {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-table.line-items td.money .currency {
-  float: left; /* £ on the left edge */
-}
+table.line-items td.money .currency { float: left; } /* £ on the left edge */
 
 /* Money input with a left £ prefix (pure CSS) */
-.money-input-wrap {
-  position: relative;
-}
+.money-input-wrap { position: relative; }
 .money-input-wrap::before {
   content: "£";
   position: absolute;
@@ -284,3 +285,111 @@ table.po-web-items td.col-qty {
 
 .center { text-align: center; }
 .num { text-align: right; white-space: nowrap; }
+
+/* =========================
+   Enhanced Navbar (New)
+   ========================= */
+
+/* Shared width wrapper for navbar + content */
+.page-shell {
+  max-width: var(--container-w);  /* already 1000px in your vars */
+  margin: 0 auto;
+}
+
+/* ===== Navbar ===== */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--nav-border);
+  box-shadow: var(--shadow);
+  border-radius: 0 0 8px 8px; /* match container look */
+}
+
+/* Inner layout stays the same */
+.nav-container {
+  padding: 0px 12px 0px 12px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* Bigger logo */
+.brand img.brand-logo {
+  height: 100px;
+  width: auto;
+  display: block;
+}
+
+.nav-toggle {
+  margin-left: auto;
+  display: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--nav-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.nav-toggle .bar {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: var(--nav-fg);
+  margin: 5px auto;
+  transition: 200ms ease;
+}
+
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.nav-link {
+  padding: .55rem .8rem;
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--nav-fg);
+  border: 1px solid transparent;
+  transition: background .2s ease, border-color .2s ease, color .2s ease;
+  background: transparent;
+}
+
+.nav-link:hover {
+  background: rgba(31,111,235,0.08);
+}
+
+.nav-link.active {
+  border-color: var(--nav-accent);
+}
+
+/* Responsive Nav */
+@media (max-width: 860px) {
+  .nav-toggle { display: inline-block; }
+  .nav-links {
+    position: absolute;
+    top: 58px;
+    left: 0;
+    right: 0;
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--nav-border);
+    box-shadow: var(--shadow);
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    padding: .5rem;
+  }
+  .nav-links.open { display: flex; }
+  .nav-link { padding: .9rem 1rem; }
+}
+
+/* Flash messages (tidy) */
+.flash-list { list-style: none; padding: 0; margin: 1rem 0; }
+.flash { padding: .7rem 1rem; border-radius: 10px; margin-bottom: .5rem; }
+.flash.success { background: #e6f9f0; color: #0b5e3c; }
+.flash.danger  { background: #ffefef; color: #8b1a1a; }
+.flash.info    { background: #eef6ff; color: #0b3f8a; }
