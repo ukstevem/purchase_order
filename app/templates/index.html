@@ -1,15 +1,48 @@
 {% extends "base.html" %}
-
 {% block title %}Purchase Order System{% endblock %}
 
 {% block content %}
-<div style="text-align: center; margin-top: 3em;">
-  <h1>📑 Purchase Order System</h1>
-  <p>Welcome to the internal PO system.</p>
-  
-  <div style="margin-top: 2em;">
-    <a href="{{ url_for('main.po_list') }}" class="btn">📋 View POs</a>
-    <a href="{{ url_for('main.create_po') }}" class="btn">➕ Create New PO</a>
-  </div>
+<h1>📑 Purchase Order System</h1>
+<p>Welcome to the internal PO system.</p>
+
+<div style="margin: 2em 0;">
+  <a href="{{ url_for('main.po_list') }}" class="btn">📋 View All POs</a>
+  <a href="{{ url_for('main.create_po') }}" class="btn">➕ Create New PO</a>
 </div>
+
+<h2>Project Summary</h2>
+{% if summary and summary|length %}
+  {% set total_draft = summary | sum(attribute='draft') %}
+  {% set total_active = summary | sum(attribute='active') %}
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Draft POs</th>
+        <th>Active POs</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in summary %}
+        <tr>
+          <td>
+            <a href="{{ url_for('main.po_list') }}?projectnumber={{ row.projectnumber|urlencode }}">
+              {{ row.project }}
+            </a>
+          </td>
+          <td>{{ row.draft }}</td>
+          <td>{{ row.active }}</td>
+        </tr>
+      {% endfor %}
+      <tr>
+        <th style="text-align:right;">Totals</th>
+        <th>{{ total_draft }}</th>
+        <th>{{ total_active }}</th>
+      </tr>
+    </tbody>
+  </table>
+{% else %}
+  <p>No purchase orders found.</p>
+{% endif %}
 {% endblock %}

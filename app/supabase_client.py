@@ -4,6 +4,7 @@ from flask import current_app
 from app.utils.status_utils import validate_po_status, POStatus
 import string
 import uuid
+from collections import defaultdict
 
 def get_headers():
     key = current_app.config.get("SUPABASE_API_KEY")
@@ -372,3 +373,45 @@ def fetch_all_po_revisions(po_number: int):
     response = requests.get(url, headers=get_headers(), params=params)
     response.raise_for_status()
     return response.json()
+
+def fetch_project_po_summary():
+    """
+    Returns:
+      [
+        {"project": "P123 — New HQ", "projectnumber": "P123", "draft": 2, "active": 5},
+        ...
+      ]
+    Active = anything not 'draft' (approved, released, issued, etc.)
+    """
+    url = f"{current_app.config['SUPABASE_URL']}/rest/v1/purchase_orders"
+    params = {
+        # relies on FK so we can pull projectnumber/description inline
+        "select": "status,project_id,projects(projectnumber,projectdescription)"
+    }
+    resp = requests.get(url, headers=get_headers(), params=params)
+    resp.raise_for_status()
+    rows = resp.json() or []
+
+    agg = defaultdict(lambda: {"project": "", "projectnumber": "", "draft": 0, "active": 0})
+
+    for r in rows:
+        pj = (r.get("projects") or {})
+        projectnumber = pj.get("projectnumber") or "—"
+        projectdesc   = pj.get("projectdescription") or ""
+        key = projectnumber
+
+        if not agg[key]["project"]:
+            title = projectnumber
+            if projectdesc:
+                title = f"{projectnumber} — {projectdesc}"
+            agg[key]["project"] = title
+            agg[key]["projectnumber"] = projectnumber
+
+        status = (r.get("status") or "").lower()
+        if status == "draft":
+            agg[key]["draft"] += 1
+        else:
+            agg[key]["active"] += 1
+
+    # stable ordering by projectnumber
+    return sorted(agg.values(), key=lambda x: x["projectnumber"])

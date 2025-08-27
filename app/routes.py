@@ -2,12 +2,12 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from app.supabase_client import fetch_suppliers, fetch_delivery_addresses, fetch_projects, insert_po_bundle, insert_line_items, fetch_delivery_contacts
 from app.utils.forms import parse_po_form
 from app.utils.project_filter import get_project_id_by_number
-from app.supabase_client import fetch_all_pos, fetch_active_pos
+from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary
 from app.utils.status_utils import POStatus, validate_po_status
 from app.utils.revision import compute_updated_revision
 from weasyprint import HTML, CSS
 from datetime import datetime, date
-from flask import current_app, render_template, request, session
+from flask import current_app, render_template, request, session, flash
 from .utils.certs_table import load_certs_table
 import base64, uuid
 from pathlib import Path
@@ -41,7 +41,12 @@ def page_not_found(e):
 
 @main.route("/")
 def index():
-    return render_template("index.html")
+    try:
+        summary = fetch_project_po_summary()
+    except Exception as e:
+        flash(f"Failed to load dashboard: {e}", "danger")
+        summary = []
+    return render_template("index.html", summary=summary)
 
 @main.route("/home")
 def home_redirect():
