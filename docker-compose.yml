@@ -18,7 +18,7 @@ services:
       # FLASK_DEBUG: "0"
       # PREFERRED_URL_SCHEME: http
     ports:
-      - "8000:8000"             # host:container
+      - "80:8000"             # host:container
     volumes:
       - ./instance:/app/instance
       - ./output:/app/output
