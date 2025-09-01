@@ -61,7 +61,7 @@
       </p>
     {% endif %}
     {% if md.get('delivery_date') %}
-        <strong>Delivery Date:</strong> {{ md.get('delivery_date')|default('', true) }}
+      <p style="margin: 0;"><strong>Delivery Date:</strong> {{ md.get('delivery_date')|format_date }}</p>
     {% endif %}
 
   </div>

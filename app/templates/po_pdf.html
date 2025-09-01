@@ -71,7 +71,7 @@ Printed: {{ now.strftime('%d %b %Y') }}
 
       {% if md.get('delivery_date') %}
         <p style="margin: .5em 0 0 0;">
-            <strong>Delivery Date:</strong> {{ md.get('delivery_date')|default('', true) }}
+            <strong>Delivery Date:</strong> {{ md.get('delivery_date')|format_date }}
         </p>
       {% endif %}
 

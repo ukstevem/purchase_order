@@ -3,6 +3,7 @@ import logging
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from app.utils.filters import format_date
 from dotenv import load_dotenv
 
 # Initialize SQLAlchemy
@@ -40,4 +41,7 @@ def create_app():
     from .routes import main
     app.register_blueprint(main)
 
+    # other setup...
+    app.jinja_env.filters["format_date"] = format_date
+    
     return app
