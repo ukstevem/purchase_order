@@ -22,7 +22,6 @@ services:
     volumes:
       - ./instance:/app/instance
       - ./output:/app/output
-      # Optional: write PDFs to a host-mounted network share on the Pi
-      # - /mnt/po_share:/mnt/share:rw
+      - "/mnt/po_share/Purchase Orders:/mnt/share:rw"
     restart: unless-stopped
     # If your app binds only on 127.0.0.1, add: command: flask run --host=0.0.0.0 --port=8000

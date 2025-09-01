@@ -5,10 +5,12 @@ from app.utils.project_filter import get_project_id_by_number
 from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary
 from app.utils.status_utils import POStatus, validate_po_status
 from app.utils.revision import compute_updated_revision
+from app.utils.pdf_archive import save_pdf_archive
 from weasyprint import HTML, CSS
 from datetime import datetime, date
 from flask import current_app, render_template, request, session, flash
 from .utils.certs_table import load_certs_table
+from werkzeug.utils import secure_filename
 import base64, uuid
 from pathlib import Path
 
@@ -397,11 +399,9 @@ def edit_po(po_id):
         idempotency_key=idempotency_key,
     )
 
-
 @main.route("/po/<po_id>/pdf")
 def po_pdf(po_id):
     from .supabase_client import fetch_po_detail
-    from datetime import datetime
 
     current_app.logger.info(f"📄 Route hit: PO PDF for {po_id}")
 
@@ -414,7 +414,6 @@ def po_pdf(po_id):
         return redirect(url_for("main.po_list"))
 
     # Compute totals
-    grand_total = 0
     net_total = 0
     for item in po.get("line_items", []):
         qty = item.get("quantity") or 0
@@ -424,35 +423,45 @@ def po_pdf(po_id):
     vat_total = net_total * 0.2
     grand_total = net_total + vat_total
 
-    # 🔥 Embed logo as base64
+    # Embed logo as base64
     logo_path = Path("app/static/img/PSS_Standard_RGB.png")
     with open(logo_path, "rb") as img_file:
         logo_base64 = base64.b64encode(img_file.read()).decode("utf-8")
 
     certs_table = load_certs_table()
 
-    # Render template
+    # Render HTML
+    now = datetime.now()
     html = render_template(
         "po_pdf.html",
         po=po,
         net_total=net_total,
         vat_total=vat_total,
         grand_total=grand_total,
-        now=datetime.now(),
+        now=now,
         logo_base64=logo_base64,
         pdf=True,
         certs_table=certs_table,
         include_certs_table=True
     )
 
-    # Generate PDF
-    pdf = HTML(string=html, base_url=request.root_url).write_pdf(
-    stylesheets=[CSS(filename="app/static/css/pdf_style.css")]
+    # Generate PDF (bytes in memory)
+    pdf_bytes = HTML(string=html, base_url=request.root_url).write_pdf(
+        stylesheets=[CSS(filename="app/static/css/pdf_style.css")]
     )
 
-    response = make_response(pdf)
+    # ==== NEW: Save an archive copy to network/share ====
+    # Build filename: <ponumber>-<revision>.pdf
+    po_number = str(po.get("po_number") or "UNKNOWN")
+    revision = str(po.get("revision") or "a")
+    filename = f"{po_number}-{revision}.pdf"
+
+    # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
+    save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
+    # ================================================
+
+    # Return PDF inline (unchanged behavior)
+    response = make_response(pdf_bytes)
     response.headers["Content-Type"] = "application/pdf"
-    response.headers["Content-Disposition"] = f"inline; filename=PO_{po['po_number']}.pdf"
+    response.headers["Content-Disposition"] = f'inline; filename={filename}'
     return response
-
-
