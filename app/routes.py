@@ -453,7 +453,7 @@ def po_pdf(po_id):
     # ==== NEW: Save an archive copy to network/share ====
     # Build filename: <ponumber>-<revision>.pdf
     po_number = str(po.get("po_number") or "UNKNOWN")
-    revision = str(po.get("revision") or "a")
+    revision = str(po.get("current_revision") or "NA")
     filename = f"{int(po_number):06d}-{revision}.pdf"
 
     # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
