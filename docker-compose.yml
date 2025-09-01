@@ -15,6 +15,8 @@ services:
       SUPABASE_KEY: ${SUPABASE_KEY}
       SECRET_KEY: ${SECRET_KEY}
       FLASK_ENV: ${FLASK_ENV:-production}
+      NETWORK_ARCHIVE_DIR: /mnt/share      # <— add this
+      SAVE_PDF_ON_DOWNLOAD: "1"
       # FLASK_DEBUG: "0"
       # PREFERRED_URL_SCHEME: http
     ports:
