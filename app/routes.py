@@ -454,7 +454,7 @@ def po_pdf(po_id):
     # Build filename: <ponumber>-<revision>.pdf
     po_number = str(po.get("po_number") or "UNKNOWN")
     revision = str(po.get("revision") or "a")
-    filename = f"{po_number}-{revision}.pdf"
+    filename = f"{po_number:06d}-{revision}.pdf"
 
     # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
     save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
