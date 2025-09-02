@@ -19,6 +19,13 @@ services:
       SAVE_PDF_ON_DOWNLOAD: "1"
       # FLASK_DEBUG: "0"
       # PREFERRED_URL_SCHEME: http
+
+      # ==== NEW: Outlook/Graph integration ====
+      MS_TENANT_ID: ${MS_TENANT_ID}
+      MS_CLIENT_ID: ${MS_CLIENT_ID}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
+      MS_OUTLOOK_MAILBOX: ${MS_OUTLOOK_MAILBOX}
+
     ports:
       - "80:8000"             # host:container
     volumes:

@@ -1,3 +1,4 @@
+# docker-compose.dev.yml
 services:
   web:
     build:
@@ -6,9 +7,25 @@ services:
     ports:
       - "5050:5000"
     volumes:
-      - .:/app
+      - .:/app         # keep your source code live-mounted
     environment:
-      - FLASK_ENV=development
-      - PYTHONDONTWRITEBYTECODE=1
-      - PYTHONUNBUFFERED=1
+      # Fill these in Portainer's "Env" tab (recommended). Examples:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      FLASK_ENV: development
+      SAVE_PDF_ON_DOWNLOAD: "1"
+      # FLASK_DEBUG: "0"
+      # PREFERRED_URL_SCHEME: http
+
+      # ==== NEW: Outlook/Graph integration ====
+      MS_TENANT_ID: ${MS_TENANT_ID}
+      MS_CLIENT_ID: ${MS_CLIENT_ID}
+      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
+      MS_OUTLOOK_MAILBOX: ${MS_OUTLOOK_MAILBOX}
+
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      NETWORK_ARCHIVE_DIR: "/app/output"   # <— save PDFs here, inside container
+
     command: ["flask","--app","run.py","run","--host=0.0.0.0","--port=5000"]

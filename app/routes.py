@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response
+from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response, jsonify, current_app
 from app.supabase_client import fetch_suppliers, fetch_delivery_addresses, fetch_projects, insert_po_bundle, insert_line_items, fetch_delivery_contacts
 from app.utils.forms import parse_po_form
 from app.utils.project_filter import get_project_id_by_number
@@ -13,6 +13,8 @@ from .utils.certs_table import load_certs_table
 from werkzeug.utils import secure_filename
 import base64, uuid
 from pathlib import Path
+from app.integrations.outlook_graph import create_draft_with_attachment
+from app.services.po_email import try_create_po_draft
 
 main = Blueprint("main", __name__)
 
@@ -457,7 +459,17 @@ def po_pdf(po_id):
     filename = f"{int(po_number):06d}-{revision}.pdf"
 
     # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
-    save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
+    archive_path = save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
+
+    # Only attempt if archiving worked
+    if archive_path:
+        try_create_po_draft(
+            archive_path=archive_path,
+            po=po,                                               # pass the PO dict you already have
+            mailbox_upn="purchasing@powersystemservices.co.uk",  # optional; else uses env MS_OUTLOOK_MAILBOX
+            # to_recipients=["orders@supplier.com"],             # optional; else inferred from po
+            # cc_recipients=["buyer@yourco.com"],                # optional
+        )
     # ================================================
 
     # Return PDF inline (unchanged behavior)
@@ -465,3 +477,73 @@ def po_pdf(po_id):
     response.headers["Content-Type"] = "application/pdf"
     response.headers["Content-Disposition"] = f'inline; filename={filename}'
     return response
+
+
+# app/email_po.py
+
+email_bp = Blueprint("email_bp", __name__)
+
+@email_bp.post("/po/<int:po_number>/email_draft")
+def create_po_email_draft(po_number: int):
+    """
+    Creates a DRAFT email in Outlook with the PO PDF attached.
+    Expected JSON body:
+    {
+      "project_number": "P-12345",
+      "revision": "2",                       # optional; if you want in filename
+      "pdf_path": "/app/output/006015-2.pdf",# absolute path inside container
+      "to": ["supplier@example.com"],        # optional
+      "cc": ["buyer@example.com"]            # optional
+    }
+    """
+    data = request.get_json(force=True) or {}
+    project_number = data.get("project_number")
+    revision = data.get("revision")  # not required for subject, but handy for filename
+    pdf_path = data.get("pdf_path")
+    to_list = data.get("to") or []
+    cc_list = data.get("cc") or []
+
+    if not (project_number and pdf_path):
+        return jsonify({"error": "project_number and pdf_path are required"}), 400
+
+    # You can standardize the PO number (six digits) if needed:
+    po_str = str(po_number).zfill(6)
+
+    # Subject: "<Project Number> PO <PO Number>"
+    subject = f"{project_number} PO {po_str}"
+
+    # Body (exact text requested)
+    body_text = (
+        f"Please find attached PO {po_str} for previously quoted materials, "
+        "please confirm as soon as possible and notify of any late or unavailable items.\n\n"
+        "Best Regards,"
+    )
+
+    # Which mailbox should receive the draft?
+    # Set MS_OUTLOOK_MAILBOX in your env (e.g., purchasing@yourdomain.com)
+    mailbox_upn = current_app.config.get("MS_OUTLOOK_MAILBOX")
+    if not mailbox_upn:
+        # fallback to env for convenience
+        import os
+        mailbox_upn = os.environ.get("MS_OUTLOOK_MAILBOX")
+    if not mailbox_upn:
+        return jsonify({"error": "MS_OUTLOOK_MAILBOX not configured"}), 500
+
+    try:
+        draft = create_draft_with_attachment(
+            mailbox_upn=mailbox_upn,
+            subject=subject,
+            body_text=body_text,
+            pdf_path=pdf_path,
+            to_recipients=to_list,
+            cc_recipients=cc_list,
+        )
+        # Return a few useful fields; webLink opens the draft in Outlook on the web
+        return jsonify({
+            "status": "ok",
+            "messageId": draft.get("id"),
+            "webLink": draft.get("webLink"),
+            "subject": draft.get("subject"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
