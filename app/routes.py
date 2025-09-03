@@ -11,10 +11,11 @@ from datetime import datetime, date
 from flask import current_app, render_template, request, session, flash
 from .utils.certs_table import load_certs_table
 from werkzeug.utils import secure_filename
-import base64, uuid
+import base64, uuid, requests
 from pathlib import Path
 from app.integrations.outlook_graph import create_draft_with_attachment
 from app.services.po_email import try_create_po_draft
+from app.utils.revision import get_next_revision
 
 main = Blueprint("main", __name__)
 
@@ -205,6 +206,107 @@ def create_po():
 
 @main.route("/edit-po/<po_id>", methods=["GET", "POST"])
 def edit_po(po_id):
+    import uuid
+    import requests
+    from flask import current_app, session, render_template, request, redirect, url_for, flash
+
+    # --- tiny Supabase helpers (local to this route) ---
+    def _sb():
+        base = current_app.config["SUPABASE_URL"].rstrip("/")
+        key  = current_app.config["SUPABASE_API_KEY"]
+        hdr  = {
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        }
+        return base, hdr
+
+    def _patch_po(po_id: str, fields: dict):
+        base, hdr = _sb()
+        clean = {k: v for k, v in (fields or {}).items() if k != "idempotency_key"}
+        if not clean:
+            return {}
+        r = requests.patch(f"{base}/rest/v1/purchase_orders?id=eq.{po_id}",
+                           headers=hdr, json=clean, timeout=30)
+        try:
+            r.raise_for_status()
+        except requests.HTTPError as e:
+            current_app.logger.error("PATCH purchase_orders failed: %s | %s", e, r.text)
+            raise
+        return r.json()[0] if r.json() else {}
+
+    def _patch_po_metadata(po_id: str, md_fields: dict):
+        """
+        Patch only columns that exist on the *active* po_metadata row for this po_id.
+        Also drop None values to avoid NOT NULL violations.
+        """
+        base, hdr = _sb()
+
+        # Discover existing columns on the active metadata row
+        g = requests.get(
+            f"{base}/rest/v1/po_metadata?po_id=eq.{po_id}&active=is.true&select=*",
+            headers=hdr, timeout=20
+        )
+        try:
+            g.raise_for_status()
+        except requests.HTTPError as e:
+            current_app.logger.error("GET po_metadata failed: %s | %s", e, g.text)
+            raise
+
+        rows = g.json()
+        if not rows:
+            # Nothing to patch; silently succeed
+            return {}
+
+        allowed = set(rows[0].keys()) - {"id", "po_id", "created", "modified", "active"}
+        clean = {
+            k: v for k, v in (md_fields or {}).items()
+            if k in allowed and v is not None and k != "idempotency_key"
+        }
+        if not clean:
+            return {}
+
+        # For PATCHing metadata we don't need a representation; avoid any edge cases
+        hdr_min = dict(hdr)
+        hdr_min["Prefer"] = "return=minimal"
+
+        r = requests.patch(
+            f"{base}/rest/v1/po_metadata?po_id=eq.{po_id}&active=is.true",
+            headers=hdr_min, json=clean, timeout=30
+        )
+        if r.status_code not in (200, 204):
+            current_app.logger.error("PATCH po_metadata failed (%s): %s", r.status_code, r.text)
+            r.raise_for_status()
+        return {}
+
+    def _replace_line_items(po_id: str, items: list):
+        base, hdr = _sb()
+        # delete existing items for this po_id
+        rdel = requests.delete(f"{base}/rest/v1/po_line_items?po_id=eq.{po_id}",
+                               headers=hdr, timeout=30)
+        if rdel.status_code not in (200, 204):
+            current_app.logger.error("DELETE po_line_items failed (%s): %s", rdel.status_code, rdel.text)
+            rdel.raise_for_status()
+        # insert new
+        if items:
+            payload = []
+            for it in items:
+                row = dict(it)
+                # scrub identity/flags that shouldn't be client-set
+                for k in ("id", "created", "modified", "active"):
+                    row.pop(k, None)
+                row["po_id"] = po_id
+                payload.append(row)
+            rins = requests.post(f"{base}/rest/v1/po_line_items",
+                                 headers=hdr, json=payload, timeout=30)
+            try:
+                rins.raise_for_status()
+            except requests.HTTPError as e:
+                current_app.logger.error("POST po_line_items failed: %s | %s", e, rins.text)
+                raise
+        return True
+
     from .supabase_client import (
         fetch_po_detail,
         deactivate_po_data,
@@ -212,46 +314,45 @@ def edit_po(po_id):
         insert_line_items,
         fetch_projects,
         fetch_suppliers,
-        fetch_delivery_addresses,   # ✅ needed in GET render
-        fetch_delivery_contacts,    # ✅ needed in GET render
+        fetch_delivery_addresses,
+        fetch_delivery_contacts,
     )
-    from .utils.revision import get_next_revision, compute_updated_revision  # ✅ import compute_updated_revision
+    from .utils.revision import get_next_revision, compute_updated_revision
     from .utils.status_utils import validate_po_status, POStatus
 
-    # ---------------- POST: create a new revision ----------------
+    # ---------------- POST: create OR patch ----------------
     if request.method == "POST":
         try:
-            # 🔒 Idempotency: verify one-shot token
+            # 🔒 Idempotency: one-shot token
             idem = request.form.get("idempotency_key")
             if not idem or idem != session.pop("last_form_token", None):
                 flash("This form was already submitted or the token is invalid.", "warning")
                 return redirect(url_for("main.edit_po", po_id=po_id))
-            
-            # 1) Fetch the existing PO
+
+            # 1) Fetch the existing PO with expansions
             po = fetch_po_detail(po_id)
             if not po:
                 flash("Original PO not found.", "danger")
                 return redirect(url_for("main.index"))
 
-            if po["status"].lower() in {"complete", "cancelled"}:
+            current_status = (po.get("status") or "draft").lower()
+            current_rev    = po.get("current_revision", "a")
+            if current_status in {"complete", "cancelled"}:
                 flash("❌ This PO is marked as complete or cancelled and cannot be edited.", "warning")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
-            # 2) Parse form, validate status transition, and resolve delivery address/contact
-            new_status = request.form.get("status", "draft").lower()
-            if po["status"] != "draft" and new_status == "draft":
+            # 2) Parse form & validate status transition
+            new_status = (request.form.get("status") or po["status"]).lower()
+            if current_status != "draft" and new_status == "draft":
                 flash("❌ You cannot revert an approved PO back to draft.", "danger")
                 return redirect(url_for("main.edit_po", po_id=po_id))
             validate_po_status(new_status)
 
-            current_status = po.get("status", "draft").lower()
-            current_rev    = po.get("current_revision", "a")
-
-            # Parse form now (we'll also resolve delivery address / contact here)
+            # Parse form into metadata + line_items (your existing helper)
             metadata, line_items = parse_po_form(request.form)
             metadata["test_certificates_required"] = _f_bool("test_cert_required")
 
-            # 🚫 No manual delivery address allowed
+            # Disallow manual address text
             manual_address_text = (request.form.get("manual_delivery_address") or "").strip()
             if manual_address_text:
                 flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
@@ -262,66 +363,119 @@ def edit_po(po_id):
                 flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
                 return redirect(url_for("main.edit_po", po_id=po_id))
 
-            # Handle delivery contact selection
-            delivery_contact_id = request.form.get("delivery_contact_id") or None
-            if delivery_contact_id == "manual":
-                # Must have a dropdown-selected address to satisfy FK on delivery_contacts.address_id
+            # Delivery contact selection
+            delivery_contact_raw = request.form.get("delivery_contact_id")
+            delivery_contact_id  = delivery_contact_raw or None
+            manual_contact_selected = (delivery_contact_raw == "manual")
+
+            if manual_contact_selected:
+                # Must have an address selected (FK)
                 if not delivery_address_id:
                     flash("Select a Delivery Address from the dropdown before adding a manual contact.", "danger")
                     return redirect(url_for("main.edit_po", po_id=po_id))
-
                 manual_contact_name = (request.form.get("manual_contact_name") or "").strip()
                 if not manual_contact_name:
                     flash("Manual contact name is required when manual contact is selected.", "danger")
                     return redirect(url_for("main.edit_po", po_id=po_id))
-
                 metadata["manual_contact_name"]  = manual_contact_name
                 metadata["manual_contact_phone"] = (request.form.get("manual_contact_phone") or "").strip()
                 metadata["manual_contact_email"] = (request.form.get("manual_contact_email") or "").strip()
-                metadata["delivery_contact_id"]  = None  # will be created in insert_po_bundle if needed
-                metadata["idempotency_key"] = idem
+                metadata["delivery_contact_id"]  = None
+                metadata["idempotency_key"]      = idem
             else:
-                # Existing contact selected (UUID) or none
+                # Existing contact selected or none
                 if delivery_contact_id:
-                    # Align address to the selected contact’s address_id to keep data consistent
                     contacts = fetch_delivery_contacts()
                     sel = next((c for c in contacts if c.get("id") == delivery_contact_id), None)
                     if not sel:
                         flash("Selected delivery contact not found.", "danger")
                         return redirect(url_for("main.edit_po", po_id=po_id))
-                    # Force address to match the contact
+                    # Align address with the contact’s address
                     delivery_address_id = sel.get("address_id") or delivery_address_id
-
-                # Clear manual fields
                 metadata["manual_contact_name"]  = None
                 metadata["manual_contact_phone"] = None
                 metadata["manual_contact_email"] = None
                 metadata["delivery_contact_id"]  = delivery_contact_id or None
 
             # Persist only dropdown address (or None). No manual text!
-            metadata["delivery_address_id"]   = delivery_address_id
+            metadata["delivery_address_id"]     = delivery_address_id
             metadata["manual_delivery_address"] = None
 
+            # Checkbox: user choice to bump revision on save
+            bump = (request.form.get("bump_revision") == "1")
+            if manual_contact_selected:
+                # Force INSERT path if creating a manual contact downstream (your bundle helper handles it)
+                bump = True
 
-            # 3) Deactivate current revision data rows
+            # ---- PATH A: terminal flips -> PATCH in place (no new revision row)
+            TERMINAL = {"released", "issued", "complete", "cancelled"}
+            if new_status in TERMINAL:
+                PO_KEYS = {"project_id", "supplier_id", "po_number", "status", "current_revision"}
+                po_fields = {
+                    "project_id":       po["project_id"],
+                    "supplier_id":      po["supplier_id"],
+                    "po_number":        po["po_number"],
+                    "status":           new_status,
+                    "current_revision": current_rev,  # unchanged
+                }
+                md_fields = {k: v for k, v in metadata.items() if k not in PO_KEYS and k != "idempotency_key"}
+
+                _patch_po(po_id, po_fields)
+                _patch_po_metadata(po_id, md_fields)
+                # Usually no line-item change for terminal flips
+                flash(f"Status set to {new_status}.", "success")
+                return redirect(url_for("main.po_preview", po_id=po_id))
+
+            # ---- PATH B: Approved + NO bump -> PATCH in place (keep same revision, replace items)
+            if current_status == "approved" and new_status == "approved" and not bump:
+                PO_KEYS = {"project_id", "supplier_id", "po_number", "status", "current_revision"}
+                po_fields = {
+                    "project_id":       po["project_id"],
+                    "supplier_id":      po["supplier_id"],
+                    "po_number":        po["po_number"],
+                    "status":           "approved",
+                    "current_revision": current_rev,  # unchanged
+                }
+                md_fields = {k: v for k, v in metadata.items() if k not in PO_KEYS and k != "idempotency_key"}
+
+                _patch_po(po_id, po_fields)
+                _patch_po_metadata(po_id, md_fields)
+                _replace_line_items(po_id, line_items)
+
+                flash("Changes saved (no revision bump).", "success")
+                return redirect(url_for("main.po_preview", po_id=po_id))
+
+            # ---- PATH C: INSERT new row as a new revision (deactivate old first)
+            # 4) Decide the target revision
+            if bump:
+                # Explicit bump (e.g., 1 -> 2)
+                target_rev = get_next_revision(str(current_rev).strip())
+            else:
+                # Your rule: only Draft -> Approved becomes "1"; otherwise unchanged
+                target_rev = compute_updated_revision(current_rev, current_status, new_status)
+                # If still in DRAFT and revision didn't change, auto-advance alpha to avoid duplicate key
+                if current_status == "draft" and new_status == "draft" and str(target_rev) == str(current_rev):
+                    target_rev = get_next_revision(str(current_rev).strip())
+
+            # 3) Deactivate current revision data rows (now that we know we will insert)
             deactivate_po_data(po_id)
 
-            # 4. Prepare updated metadata
-            metadata["project_id"]          = po["project_id"]
-            metadata["supplier_id"]         = po["supplier_id"]
-            metadata["po_number"]           = po["po_number"]
-            metadata["status"]              = new_status
-            metadata["current_revision"]    = compute_updated_revision(current_rev, current_status, new_status)
-            metadata["delivery_address_id"] = delivery_address_id
+            # 5) Prepare updated metadata for INSERT
+            metadata["project_id"]              = po["project_id"]
+            metadata["supplier_id"]             = po["supplier_id"]
+            metadata["po_number"]               = po["po_number"]
+            metadata["status"]                  = new_status
+            metadata["current_revision"]        = target_rev
+            metadata["delivery_address_id"]     = delivery_address_id
             metadata["manual_delivery_address"] = None
 
-            # 5) Insert new PO + items
+            # 6) Insert new PO + items
             new_po_id = insert_po_bundle(metadata)
             for item in line_items:
                 item["po_id"] = new_po_id
             insert_line_items(line_items)
 
-            flash("PO revision created successfully.", "success")
+            flash(f"PO revision created successfully (rev {target_rev}).", "success")
             return redirect(url_for("main.po_preview", po_id=new_po_id))
 
         except Exception as e:
@@ -330,13 +484,13 @@ def edit_po(po_id):
             flash(f"Error creating revision: {e}", "danger")
             return redirect(url_for("main.edit_po", po_id=po_id))
 
-    # ---------------- GET: render edit form ----------------
+    # ---------------- GET: render edit form (unchanged) ----------------
     po = fetch_po_detail(po_id)
     if not po:
         return render_template("404.html"), 404
 
     # ✅ Safely get active metadata (handles None, list, or dict)
-    po_metadata = _active_po_metadata(po)
+    po_metadata = _active_po_metadata(po)  # existing helper
 
     # Linked objects (may be None if not expanded by your fetch)
     delivery_contact = po.get("delivery_contact")
@@ -386,7 +540,7 @@ def edit_po(po_id):
 
     # Generate a one-shot token for the edit form
     idempotency_key = str(uuid.uuid4())
-    session['last_form_token'] = idempotency_key
+    session["last_form_token"] = idempotency_key
 
     return render_template(
         "po_form.html",
@@ -400,6 +554,7 @@ def edit_po(po_id):
         delivery_addresses=fetch_delivery_addresses(),
         idempotency_key=idempotency_key,
     )
+
 
 @main.route("/po/<po_id>/pdf")
 def po_pdf(po_id):
@@ -547,3 +702,95 @@ def create_po_email_draft(po_number: int):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# --- Bump revision route (insert a new PO row with next revision) ---
+
+def _sb_base() -> str:
+    return current_app.config["SUPABASE_URL"].rstrip("/")
+
+def _sb_headers() -> dict:
+    key = current_app.config["SUPABASE_API_KEY"]
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+def _get_po(po_id: str) -> dict:
+    url = f"{_sb_base()}/rest/v1/purchase_orders?id=eq.{po_id}&select=*"
+    r = requests.get(url, headers=_sb_headers(), timeout=20)
+    r.raise_for_status()
+    rows = r.json()
+    if not rows:
+        raise ValueError("PO not found")
+    return rows[0]
+
+def _insert_po(row: dict) -> dict:
+    url = f"{_sb_base()}/rest/v1/purchase_orders"
+    r = requests.post(url, headers=_sb_headers(), json=row, timeout=30)
+    r.raise_for_status()
+    return r.json()[0]
+
+def _clone_line_items(from_po_id: str, to_po_id: str) -> int:
+    """Copy all line items from one PO to another. Adjust field names if needed."""
+    base = _sb_base()
+    hdr = _sb_headers()
+
+    # pull existing items
+    get_url = f"{base}/rest/v1/po_line_items?po_id=eq.{from_po_id}&select=*"
+    gi = requests.get(get_url, headers=hdr, timeout=30)
+    gi.raise_for_status()
+    items = gi.json()
+
+    if not items:
+        return 0
+
+    # strip identity fields; set new po_id
+    payload = []
+    for it in items:
+        clean = {k: v for k, v in it.items() if k not in ("id", "created", "modified")}
+        clean["po_id"] = to_po_id
+        payload.append(clean)
+
+    post_url = f"{base}/rest/v1/po_line_items"
+    pi = requests.post(post_url, headers=hdr, json=payload, timeout=30)
+    pi.raise_for_status()
+    return len(payload)
+
+@main.post("/po/<po_id>/advance-revision")
+def advance_revision(po_id):
+    try:
+        cur = _get_po(po_id)
+
+        # Only bump by choice; status remains the same (e.g., 'approved')
+        next_rev = get_next_revision(str(cur.get("revision", "1")).strip())
+
+        # Build new row by copying current, excluding identity/auto fields
+        new_row = {k: v for k, v in cur.items()
+                   if k not in ("id", "created", "modified")}
+        new_row.update({
+            "revision": next_rev,
+            # If you prefer to force status:
+            # "status": "approved",
+        })
+
+        created = _insert_po(new_row)
+
+        # Optional: clone line items for the new revision
+        try:
+            _clone_line_items(cur["id"], created["id"])
+        except Exception as e:
+            current_app.logger.warning("Line item clone warning: %s", e)
+
+        flash(f"Revision bumped to {next_rev}.", "success")
+        return redirect(url_for("main.edit_po", po_id=created["id"]))
+
+    except requests.HTTPError as e:
+        current_app.logger.error("Advance revision failed: %s | %s", e, getattr(e.response, "text", ""))
+        flash("Failed to bump revision.", "error")
+        return redirect(url_for("main.edit_po", po_id=po_id))
+    except Exception as e:
+        current_app.logger.error("Advance revision error: %s", e)
+        flash("Failed to bump revision.", "error")
+        return redirect(url_for("main.edit_po", po_id=po_id))

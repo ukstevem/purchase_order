@@ -4,9 +4,9 @@ import json
 import os
 import pathlib
 import requests
+import msal
 from typing import List, Optional
 
-import msal  # pip install msal
 
 GRAPH_SCOPE = ["https://graph.microsoft.com/.default"]
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"

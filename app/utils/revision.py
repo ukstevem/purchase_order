@@ -1,3 +1,5 @@
+from app.utils.status_utils import POStatus
+
 def get_next_revision(current: str) -> str:
     """
     Returns the next revision string given the current one.
@@ -9,7 +11,7 @@ def get_next_revision(current: str) -> str:
 
     # Case 1: Alphabetic draft revisions
     if len(rev) == 1 and rev.isalpha() and rev.islower():
-        if rev == 'Z':
+        if rev == 'z':
             raise ValueError("Revision limit reached (Z)")
         return chr(ord(rev) + 1)
 
@@ -31,42 +33,26 @@ def update_revision_and_status(current_rev: str, current_status: str, new_status
             return "1"
     return get_next_revision(current_rev)
 
-
-from app.utils.status_utils import POStatus
-from app.utils.revision import get_next_revision
-
 TERMINAL_STATUSES = {
     POStatus.ISSUED.value,
     POStatus.COMPLETE.value,
     POStatus.CANCELLED.value
 }
 
-
 def compute_updated_revision(current_rev: str, current_status: str, new_status: str) -> str:
     """
-    Simplified logic:
-    - 'a' → '1' when approved
-    - No change if moving to cancelled or complete
-    - Once approved, all further edits increment numeric revision
-    - Cannot revert to draft from approved
+    Minimal rule set:
+    - Draft -> Approved: force revision to '1' once.
+    - Otherwise: NEVER change revision automatically.
     """
-    current_rev = current_rev.strip().lower()
-    current_status = current_status.lower()
-    new_status = new_status.lower()
+    current_rev = (current_rev or "").strip()
+    current_status = (current_status or "").strip().lower()
+    new_status = (new_status or "").strip().lower()
 
-    if new_status in TERMINAL_STATUSES:
-        return current_rev  # no rev change
-
-    # Initial transition from draft → approved
+    # Only one automatic conversion in the lifecycle
     if current_status == "draft" and new_status == "approved":
-        return "1"
+        # if already numeric, keep it; if alpha, convert to '1'
+        return "1" if (len(current_rev) == 1 and current_rev.isalpha() and current_rev.islower()) else current_rev
 
-    # After approved: revision must be numeric and incremented
-    if current_rev.isdigit():
-        return str(int(current_rev) + 1)
-
-    # Stay in alpha series while still drafting
-    if current_status == "draft" and new_status == "draft":
-        return get_next_revision(current_rev)
-
-    return current_rev  # fallback
+    # No auto-bumps in any other case
+    return current_rev

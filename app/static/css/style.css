@@ -393,3 +393,63 @@ table.po-web-items td.col-qty {
 .flash.success { background: #e6f9f0; color: #0b5e3c; }
 .flash.danger  { background: #ffefef; color: #8b1a1a; }
 .flash.info    { background: #eef6ff; color: #0b3f8a; }
+
+/* ==== Form Actions Row (Status • Bump • Save) ==== */
+.actions-bar {
+  display: grid;
+  grid-template-rows: auto 36px;       /* Row 1: labels, Row 2: controls */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, auto);
+  column-gap: 1rem;
+  justify-content: end;
+  margin-top: 1.5rem;
+}
+
+/* Top row labels */
+.actions-bar > .actions-label {
+  grid-row: 1;
+  margin: 0 0 .25rem 0;                /* compact label spacing */
+  display: block;
+}
+
+/* Bottom row controls */
+.actions-bar > .actions-control,
+.actions-bar > .actions-submit {
+  grid-row: 2;
+}
+
+/* Override global margins so selects don't sit lower than the button */
+.actions-bar select,
+.actions-bar input,
+.actions-bar textarea {
+  margin: 0 !important;
+}
+
+.actions-bar .btn {
+  margin: 0;                           /* ensure the button matches */
+}
+
+/* Control sizing */
+.actions-control select {
+  height: 36px;                        /* same as your global select height */
+  min-width: 200px;
+}
+
+/* Button sizing to match controls */
+.btn-compact {
+  height: 36px;
+  line-height: 36px;
+  padding: 0 1rem;
+}
+
+/* Optional: tiny cross-browser nudge if a browser renders 1px off */
+/* .actions-submit .btn-compact { position: relative; top: 1px; } */
+
+/* Responsive stacking on narrow screens */
+@media (max-width: 640px) {
+  .actions-bar {
+    grid-auto-columns: 1fr;
+    row-gap: .5rem;
+    justify-content: stretch;
+  }
+}

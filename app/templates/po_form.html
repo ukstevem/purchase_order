@@ -171,29 +171,39 @@
 
   <button type="button" class="btn" onclick="addLineItem()">+ Add Line Item</button>
 
-  <!-- Actions row -->
-  <div style="text-align: right; margin-top: 1.5rem;">
-    {% if mode == 'edit' and po_data.po_number %}
-      <div style="display: inline-block; vertical-align: bottom; margin-right: 1rem; text-align: left;">
-        <label for="status" style="display:block; margin:0 0 0.25rem 0;">PO Status:</label>
-        <select name="status" id="status"
-                style="width: 180px; height: 36px; line-height: 36px; padding: 0 0.5rem; box-sizing: border-box; margin: 0;">
-          {% for s in statuses %}
-            <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>
-              {{ s.title() }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-    {% endif %}
-
-    <div style="display: inline-block; vertical-align: bottom;">
-      <button type="submit" class="btn" id="save-btn"
-              style="height: 36px; line-height: 36px; padding: 0 1rem; box-sizing: border-box; margin: 0;">
-        {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
-      </button>
+<!-- Actions row -->
+<div class="actions-bar">
+  {% if mode == 'edit' and po_data.po_number %}
+    <label for="status" class="actions-label">PO Status</label>
+    <div class="actions-control">
+      <select name="status" id="status">
+        {% for s in statuses %}
+          <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>{{ s.title() }}</option>
+        {% endfor %}
+      </select>
     </div>
+  {% endif %}
+
+  {% if po_data.status == 'approved' %}
+    <label for="bump_revision" class="actions-label">Bump Revision</label>
+    <div class="actions-control">
+      <select name="bump_revision" id="bump_revision">
+        <option value="0" selected>No</option>
+        <option value="1">Yes</option>
+      </select>
+    </div>
+  {% endif %}
+
+  <!-- Empty label cell keeps the grid aligned -->
+  <span class="actions-label" aria-hidden="true"></span>
+  <div class="actions-submit">
+    <button type="submit" class="btn btn-compact" id="save-btn">
+      {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
+    </button>
   </div>
+</div>
+
+
 
 </form>
 
