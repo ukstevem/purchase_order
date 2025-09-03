@@ -26,6 +26,7 @@ def parse_po_form(form):
         "delivery_terms": form["delivery_terms"],
         "delivery_date": form["delivery_date"],
         "test_certificates_required": test_cert_required,
+        "supplier_reference_number": (form.get("supplier_reference_number") or "").strip() or None,
     }
 
     # Build line items

@@ -89,11 +89,20 @@
 
     <!-- Delivery Date + Terms + Test Certificates in one row -->
   <div class="form-row">
+
+    <div class="form-col narrow">
+      <label for="supplier_reference_number">Supplier Ref / Quote</label>
+      <input type="text" name="supplier_reference_number" id="supplier_reference_number"
+            placeholder="e.g. Q-12345"
+            value="{{ po_data.get('supplier_reference_number', '') }}">
+    </div>
+
     <div class="form-col narrow">
       <label for="delivery_date">Delivery Date</label>
       <input type="date" name="delivery_date" id="delivery_date"
             required value="{{ po_data.get('delivery_date', '') }}">
     </div>
+
     <div class="form-col">
       <label for="delivery_terms">Delivery Terms</label>
       <select id="delivery_terms" name="delivery_terms" required>
@@ -111,6 +120,7 @@
         <option value="CIF" {% if po_data.get('delivery_terms') == 'CIF' %}selected{% endif %}>CIF — Cost, Insurance & Freight</option>
       </select>
     </div>
+
     <div class="form-col narrow">
       <label for="test_cert_required">Test Certificates Required</label>
       <select name="test_cert_required" id="test_cert_required">

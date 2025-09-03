@@ -79,7 +79,9 @@ def po_preview(po_id):
     # print(f"📄 Route hit: PO preview for {po_id}")
     try:
         po = fetch_po_detail(po_id)
-        print(f"PO Preview Data : {po}")
+        md_list = po.get("po_metadata") or []
+        md = md_list[0] if isinstance(md_list, list) and md_list else {}
+        # print(f"PO Preview Data : {po}")
         if not po:
             print("⚠️ PO not found or empty")
             return render_template("404.html"), 404
@@ -101,7 +103,7 @@ def po_preview(po_id):
         vat_total = net_total * 0.2
         grand_total = net_total + vat_total
 
-    return render_template("po_web.html", po=po, grand_total=grand_total, vat_total=vat_total, net_total=net_total, now=datetime.now())
+    return render_template("po_web.html", po=po, md=md, grand_total=grand_total, vat_total=vat_total, net_total=net_total, now=datetime.now())
 
 @main.route("/create-po", methods=["GET", "POST"])
 def create_po():
@@ -536,6 +538,7 @@ def edit_po(po_id):
         "manual_contact_name": manual_contact_name,
         "manual_contact_phone": manual_contact_phone,
         "manual_contact_email": manual_contact_email,
+        "supplier_reference_number": po_metadata.get("supplier_reference_number", ""),
     }
 
     # Generate a one-shot token for the edit form

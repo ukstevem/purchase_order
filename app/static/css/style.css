@@ -453,3 +453,19 @@ table.po-web-items td.col-qty {
     justify-content: stretch;
   }
 }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 2fr 1fr; /* date | terms | cert | supplier ref */
+  gap: 12px;
+  align-items: end;
+}
+.form-col.narrow select,
+.form-col.narrow input { width: 100%; }
+
+.form-col.terms-slim select { width: 100%; }
+
+/* Optional: stack on small screens */
+@media (max-width: 800px) {
+  .form-row { grid-template-columns: 1fr; }
+}

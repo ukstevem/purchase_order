@@ -69,6 +69,10 @@ Printed: {{ now.strftime('%d %b %Y') }}
         {% if sup.get('postcode') %}{{ sup.get('postcode')|default('', true) }}{% endif %}
       </p>
 
+      {% if md.get('supplier_reference_number') %}
+            <strong>Ref:</strong> {{ md.get('supplier_reference_number') }}
+      {% endif %}
+
       {% if md.get('delivery_date') %}
         <p style="margin: .5em 0 0 0;">
             <strong>Delivery Date:</strong> {{ md.get('delivery_date')|format_date }}
