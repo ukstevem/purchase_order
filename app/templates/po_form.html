@@ -149,7 +149,12 @@
     <tbody id="line-items-container">
       {% for item in po_data.get('line_items', [{}]) %}
         <tr>
-          <td><input type="text" name="description[]" value="{{ item.get('description', '') }}" placeholder="Description" required></td>
+          <td>
+              <textarea name="description[]" 
+                placeholder="Description" 
+                required 
+                rows="1">{{ item.get('description', '') }}</textarea>
+          </td>
           <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
           <td><input type="text" name="unit[]" value="{{ item.get('unit', '') }}" placeholder="Unit" required></td>
           <td>

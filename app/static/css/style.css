@@ -469,3 +469,8 @@ table.po-web-items td.col-qty {
 @media (max-width: 800px) {
   .form-row { grid-template-columns: 1fr; }
 }
+
+textarea[name="description[]"] {
+  min-height: 1em;   /* shrink default size */
+  resize: vertical;  /* allow user to expand if needed */
+}

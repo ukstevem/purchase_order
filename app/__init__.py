@@ -3,7 +3,7 @@ import logging
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from app.utils.filters import format_date
+from app.utils.filters import format_date, nl2br
 from app.routes import email_bp
 from dotenv import load_dotenv
 
@@ -45,5 +45,7 @@ def create_app():
 
     # other setup...
     app.jinja_env.filters["format_date"] = format_date
+    app.jinja_env.filters["nl2br"] = nl2br
+
     
     return app

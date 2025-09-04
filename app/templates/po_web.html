@@ -133,7 +133,7 @@
       {% set line_total = item.get('total') if item.get('total') is not none else (qty * unit_price) %}
       <tr>
         <td class="col-idx center">{{ loop.index }}</td>
-        <td class="col-desc">{{ item.get('description')|default('', true) }}</td>
+        <td class="col-desc">{{ item.get('description', '') | nl2br }}</td>
         <td class="col-qty center">{{ "{:,.0f}".format(qty) }}</td>
         <td class="col-unit">{{ item.get('unit')|default('', true) }}</td>
         <td class="col-price num">{{ money_cell(unit_price) }}</td>
