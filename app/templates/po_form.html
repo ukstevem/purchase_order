@@ -199,7 +199,8 @@
     </div>
   {% endif %}
 
-  {% if po_data.status == 'approved' %}
+  {% set st = (po_data.status or 'draft')|lower %}
+  {% if st in ['approved', 'issued'] %}
     <label for="bump_revision" class="actions-label">Bump Revision</label>
     <div class="actions-control">
       <select name="bump_revision" id="bump_revision">

@@ -3,7 +3,11 @@ from app.supabase_client import fetch_suppliers, fetch_delivery_addresses, fetch
 from app.utils.forms import parse_po_form
 from app.utils.project_filter import get_project_id_by_number
 from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary
-from app.utils.status_utils import POStatus, validate_po_status
+from app.utils.status_utils import (
+    allowed_next_statuses, 
+    is_forward_or_same, 
+    coerce_rev_on_leaving_draft
+    )
 from app.utils.revision import compute_updated_revision
 from app.utils.pdf_archive import save_pdf_archive
 from weasyprint import HTML, CSS
@@ -309,6 +313,22 @@ def edit_po(po_id):
                 raise
         return True
 
+    # --- revision helpers (local to this route) ---
+    def _is_numeric_ge_1(rev) -> bool:
+        try:
+            return int(str(rev).strip()) >= 1
+        except Exception:
+            return False
+
+    def _coerce_rev_on_leaving_draft(prev_rev, old_status, new_status):
+        """
+        If moving out of 'draft', set revision to '1' unless it's already numeric >= 1.
+        Fires on any move from draft up the chain.
+        """
+        if (old_status or '').lower() == 'draft' and (new_status or '').lower() != 'draft':
+            return str(prev_rev).strip() if _is_numeric_ge_1(prev_rev) else '1'
+        return prev_rev
+
     from .supabase_client import (
         fetch_po_detail,
         deactivate_po_data,
@@ -410,22 +430,25 @@ def edit_po(po_id):
                 bump = True
 
             # ---- PATH A: terminal flips -> PATCH in place (no new revision row)
-            TERMINAL = {"released", "issued", "complete", "cancelled"}
+            TERMINAL = {"issued", "complete", "cancelled"}
             if new_status in TERMINAL:
                 PO_KEYS = {"project_id", "supplier_id", "po_number", "status", "current_revision"}
+
+                # leaving draft -> set '1' unless already numeric >=1
+                coerced_rev = _coerce_rev_on_leaving_draft(current_rev, current_status, new_status)
+
                 po_fields = {
                     "project_id":       po["project_id"],
                     "supplier_id":      po["supplier_id"],
                     "po_number":        po["po_number"],
                     "status":           new_status,
-                    "current_revision": current_rev,  # unchanged
+                    "current_revision": coerced_rev,
                 }
                 md_fields = {k: v for k, v in metadata.items() if k not in PO_KEYS and k != "idempotency_key"}
 
                 _patch_po(po_id, po_fields)
                 _patch_po_metadata(po_id, md_fields)
-                # Usually no line-item change for terminal flips
-                flash(f"Status set to {new_status}.", "success")
+                flash(f"Status set to {new_status} (rev {po_fields['current_revision']}).", "success")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
             # ---- PATH B: Approved + NO bump -> PATCH in place (keep same revision, replace items)
@@ -453,11 +476,14 @@ def edit_po(po_id):
                 # Explicit bump (e.g., 1 -> 2)
                 target_rev = get_next_revision(str(current_rev).strip())
             else:
-                # Your rule: only Draft -> Approved becomes "1"; otherwise unchanged
+                # Your rule: originally only Draft -> Approved = "1"; we extend to any move out of draft
                 target_rev = compute_updated_revision(current_rev, current_status, new_status)
                 # If still in DRAFT and revision didn't change, auto-advance alpha to avoid duplicate key
                 if current_status == "draft" and new_status == "draft" and str(target_rev) == str(current_rev):
                     target_rev = get_next_revision(str(current_rev).strip())
+
+            # ensure: leaving draft (to approved/issued/complete/cancelled) -> '1' unless already >=1
+            target_rev = _coerce_rev_on_leaving_draft(target_rev, current_status, new_status)
 
             # 3) Deactivate current revision data rows (now that we know we will insert)
             deactivate_po_data(po_id)
@@ -486,7 +512,7 @@ def edit_po(po_id):
             flash(f"Error creating revision: {e}", "danger")
             return redirect(url_for("main.edit_po", po_id=po_id))
 
-    # ---------------- GET: render edit form (unchanged) ----------------
+    # ---------------- GET: render edit form (unchanged except statuses list) ----------------
     po = fetch_po_detail(po_id)
     if not po:
         return render_template("404.html"), 404
@@ -545,19 +571,27 @@ def edit_po(po_id):
     idempotency_key = str(uuid.uuid4())
     session["last_form_token"] = idempotency_key
 
+    # Build forward-only statuses for the dropdown
+    _FLOW = ['draft', 'approved', 'issued', 'complete', 'cancelled']
+    _cur  = (po.get("status") or 'draft').lower()
+    try:
+        _start = _FLOW.index(_cur)
+    except ValueError:
+        _start = 0
+    statuses_forward = _FLOW[_start:]
+
     return render_template(
         "po_form.html",
         mode="edit",
         form_action=url_for("main.edit_po", po_id=po_id),
         po_data=po_data,
-        statuses=[s.value for s in POStatus],
+        statuses=statuses_forward,  # forward-only list
         projects=fetch_projects(),
         suppliers=fetch_suppliers(),
         delivery_contacts=fetch_delivery_contacts(),
         delivery_addresses=fetch_delivery_addresses(),
         idempotency_key=idempotency_key,
     )
-
 
 @main.route("/po/<po_id>/pdf")
 def po_pdf(po_id):
