@@ -229,7 +229,9 @@ function addLineItem() {
   const container = document.getElementById('line-items-container');
   const row = document.createElement('tr');
   row.innerHTML = `
-    <td><input type="text" name="description[]" placeholder="Description" required></td>
+    <td>
+      <textarea name="description[]" placeholder="Description" rows="1" required></textarea>
+    </td>
     <td><input type="number" name="quantity[]" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
     <td><input type="text" name="unit[]" placeholder="Unit" required></td>
     <td>
@@ -241,7 +243,7 @@ function addLineItem() {
     <td class="actions"><button type="button" class="btn" onclick="removeLineItem(this)">Remove</button></td>
   `;
   container.appendChild(row);
-  wireMoneyInputs(row);   // <-- important: attach listeners to the new money input
+  wireMoneyInputs(row);   // attach money listeners to the new input
   updateTotal();
 }
 
@@ -250,8 +252,113 @@ function removeLineItem(button) {
   updateTotal();
 }
 
-/* -------------------- Money input formatting -------------------- */
-/* Parse "£1,234.56" or "1234.56" -> 1234.56 */
+/* -------------------- Money input formatting (caret-stable) -------------------- */
+/* Add commas to integer part */
+function addCommas(intStr) {
+  return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/* Sanitize to numeric with ≤2 decimals (no £, no commas) */
+function sanitizeToNumeric(str) {
+  if (!str) return '';
+  let s = String(str).replace(/[^0-9.]/g, '');
+  const firstDot = s.indexOf('.');
+  if (firstDot !== -1) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
+  }
+  const parts = s.split('.');
+  parts[0] = parts[0].replace(/^0+(?=\d)/, ''); // trim leading zeros
+  if (parts.length > 1) parts[1] = parts[1].slice(0, 2);
+  return parts.join('.');
+}
+
+/* Format numeric string -> "1,234.56" (string) */
+function formatNumericString(numStr) {
+  if (!numStr) return '';
+  const [intPart, decPartRaw = ''] = numStr.split('.');
+  const intFmt = addCommas(intPart.length ? intPart : '0');
+  if (numStr.endsWith('.') && decPartRaw === '') return intFmt + '.';
+  const decPart = decPartRaw;
+  return decPart ? `${intFmt}.${decPart}` : intFmt;
+}
+
+/* Count digits before caret */
+function countDigitsBefore(str, caret) {
+  let c = 0;
+  for (let i = 0; i < Math.min(caret, str.length); i++) {
+    if (/\d/.test(str[i])) c++;
+  }
+  return c;
+}
+
+/* Find caret index after N digits */
+function caretIndexForDigitCount(str, digits) {
+  if (digits <= 0) return 0;
+  let seen = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (/\d/.test(str[i])) {
+      seen++;
+      if (seen === digits) return i + 1;
+    }
+  }
+  return str.length;
+}
+
+/* Format with commas while preserving caret position */
+function moneyFormatWithCaret(e) {
+  const input = e.target;
+
+  const prevValue = input.value;
+  const prevCaret = input.selectionStart ?? prevValue.length;
+  const prevDigitsBefore = countDigitsBefore(prevValue, prevCaret);
+
+  const numeric = sanitizeToNumeric(prevValue);      // clean raw
+  const formatted = formatNumericString(numeric);    // pretty with commas
+
+  input.value = formatted;
+  input.dataset.rawValue = numeric && numeric !== '.' ? numeric : '0';
+
+  const newCaret = caretIndexForDigitCount(formatted, prevDigitsBefore);
+  try { input.setSelectionRange(newCaret, newCaret); } catch (_) {}
+
+  updateTotal();
+}
+
+/* Keep formatting on focus; select all if zero so first digit replaces it */
+function moneyFocusStable(e) {
+  const input = e.target;
+  const v = input.value;
+  if (v === '0.00' || v === '0') {
+    try { input.select(); } catch (_) {}
+  }
+}
+
+/* Initialise an existing money input’s value/dataset */
+function moneyInit(input) {
+  const numeric = sanitizeToNumeric(input.value);
+  input.dataset.rawValue = numeric && numeric !== '.' ? numeric : '0';
+  input.value = numeric ? formatNumericString(numeric) : '';
+}
+
+/* Attach listeners to existing or newly-added rows */
+function wireMoneyInputs(root = document) {
+  root.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
+    if (input._moneyWired) return;
+    input._moneyWired = true;
+
+    moneyInit(input);
+
+    input.addEventListener('focus', moneyFocusStable);
+    input.addEventListener('input', moneyFormatWithCaret);
+    input.addEventListener('blur', moneyFormatWithCaret); // safety for mobile keyboards
+  });
+}
+
+/* -------------------- Totals -------------------- */
+function formatMoneyNumber(num) {
+  return Number(num).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function parseMoney(str) {
   if (!str) return 0;
   const raw = String(str).replace(/[^0-9.]/g, "");
@@ -259,65 +366,6 @@ function parseMoney(str) {
   return isNaN(num) ? 0 : num;
 }
 
-/* Format 1234.56 -> "1,234.56" (no currency symbol in inputs) */
-function formatMoneyNumber(num) {
-  return Number(num).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-/* On focus: show plain number (no commas) */
-function moneyFocus(e) {
-  const input = e.target;
-  const raw = input.dataset.rawValue ?? parseMoney(input.value);
-  input.value = raw ? String(raw) : "";
-}
-
-/* On input: update raw value; DO NOT reformat (preserves caret) */
-function moneyInput(e) {
-  const input = e.target;
-  const raw = parseMoney(input.value);
-  input.dataset.rawValue = raw;
-  updateTotal();
-}
-
-/* On blur: format nicely with commas */
-function moneyBlur(e) {
-  const input = e.target;
-  const raw = input.dataset.rawValue ?? parseMoney(input.value);
-  input.dataset.rawValue = raw;
-  input.value = raw ? formatMoneyNumber(raw) : "";
-}
-
-/* Attach money listeners to existing or newly-added rows */
-function wireMoneyInputs(root = document) {
-  root.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
-    if (input._moneyWired) return;
-    input._moneyWired = true;
-    input.addEventListener('focus', moneyFocus);
-    input.addEventListener('input', moneyInput);
-    input.addEventListener('blur', moneyBlur);
-
-    // Initial normalisation: capture raw and show formatted
-    const raw = parseMoney(input.value);
-    input.dataset.rawValue = raw;
-    input.value = raw ? formatMoneyNumber(raw) : "";
-  });
-}
-
-// Before submit: replace formatted prices with raw numeric values
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.querySelector('form');
-  if (!form) return;
-  form.addEventListener('submit', () => {
-    document.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
-      const raw = (input.dataset.rawValue != null)
-        ? String(input.dataset.rawValue)
-        : (input.value || '').replace(/[^0-9.]/g, '');
-      input.value = raw; // ensure backend gets e.g. "11111.00"
-    });
-  });
-});
-
-/* -------------------- Totals -------------------- */
 function updateTotal() {
   const rows = document.querySelectorAll('#line-items-container tr');
   let grand = 0;
@@ -356,9 +404,12 @@ function setManualInputsEnabled(enabled) {
   nameInput.required = !!enabled;
 }
 function clearManualInputs() {
-  document.getElementById('manual_contact_name').value = "";
-  document.getElementById('manual_contact_phone').value = "";
-  document.getElementById('manual_contact_email').value = "";
+  const n = document.getElementById('manual_contact_name');
+  const p = document.getElementById('manual_contact_phone');
+  const e = document.getElementById('manual_contact_email');
+  if (n) n.value = "";
+  if (p) p.value = "";
+  if (e) e.value = "";
 }
 function toggleManualContact() {
   const contactSelect = document.getElementById('delivery_contact_id');
@@ -399,6 +450,21 @@ function filterContacts() {
   }
 }
 
+/* -------------------- Submit normalisation -------------------- */
+// Ensure backend gets raw numeric unit_price values (no commas/£)
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('po-form') || document.querySelector('form');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    document.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
+      const raw = (input.dataset.rawValue != null)
+        ? String(input.dataset.rawValue)
+        : (input.value || '').replace(/[^0-9.]/g, '');
+      input.value = raw; // e.g. "11111.00"
+    });
+  });
+});
+
 /* -------------------- Init -------------------- */
 window.addEventListener("DOMContentLoaded", function () {
   // Money inputs + totals
@@ -410,29 +476,27 @@ window.addEventListener("DOMContentLoaded", function () {
   const manualContactNameEl = document.getElementById('manual_contact_name');
   const manualContactName = manualContactNameEl ? manualContactNameEl.value.trim() : "";
 
-  if (manualContactName && !contactSelect.value) {
+  if (manualContactName && contactSelect && !contactSelect.value) {
     contactSelect.value = 'manual';
   }
 
-  toggleManualContact();
+  if (contactSelect) toggleManualContact();
   filterContacts();
 });
 
 /* -------------------- Disable save button on press -------------------- */
-
-  (function () {
-    const form = document.getElementById('po-form');
-    const btn  = document.getElementById('save-btn');
-    let submitted = false;
-    form.addEventListener('submit', function (e) {
-      if (submitted) { e.preventDefault(); return; }
-      submitted = true;
-      btn.disabled = true;
-      btn.textContent = 'Saving…';
-    });
-  })();
-
-
+(function () {
+  const form = document.getElementById('po-form');
+  const btn  = document.getElementById('save-btn');
+  if (!form || !btn) return;
+  let submitted = false;
+  form.addEventListener('submit', function (e) {
+    if (submitted) { e.preventDefault(); return; }
+    submitted = true;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+  });
+})();
 </script>
 
 {% endblock %}
