@@ -74,24 +74,18 @@ def po_list():
         flash(f"Failed to load POs: {e}", "danger")
         pos = []
 
-    # print("📦 projectnumber from request.args:", projectnumber)
     return render_template("po_list.html", pos=pos, projectnumber=projectnumber)
 
 @main.route("/po/<po_id>")
 def po_preview(po_id):
     from .supabase_client import fetch_po_detail
-    # print(f"📄 Route hit: PO preview for {po_id}")
     try:
         po = fetch_po_detail(po_id)
         md_list = po.get("po_metadata") or []
         md = md_list[0] if isinstance(md_list, list) and md_list else {}
-        # print(f"PO Preview Data : {po}")
         if not po:
-            print("⚠️ PO not found or empty")
             return render_template("404.html"), 404
-        # print(f"✅ Fetched PO: {po.get('po_number', 'N/A')}")
     except Exception as e:
-        print(f"❌ Exception fetching PO: {e}")
         flash(f"Failed to load PO: {e}", "danger")
         return redirect(url_for("main.po_list"))
 
@@ -196,7 +190,6 @@ def create_po():
 
     idempotency_key = str(uuid.uuid4())
     session['last_form_token'] = idempotency_key
-
 
     return render_template(
         "po_form.html",
@@ -423,18 +416,45 @@ def edit_po(po_id):
             metadata["delivery_address_id"]     = delivery_address_id
             metadata["manual_delivery_address"] = None
 
-            # Checkbox: user choice to bump revision on save
+            # 🔁 Bump flag & allowance (only approved/issued are allowed to bump)
             bump = (request.form.get("bump_revision") == "1")
+            bump_allowed = new_status in {"approved", "issued"}
             if manual_contact_selected:
-                # Force INSERT path if creating a manual contact downstream (your bundle helper handles it)
+                # Force INSERT path if creating a manual contact downstream
                 bump = True
 
-            # ---- PATH A: terminal flips -> PATCH in place (no new revision row)
+            # ---- PATH A: terminal flips (issued/complete/cancelled)
             TERMINAL = {"issued", "complete", "cancelled"}
             if new_status in TERMINAL:
-                PO_KEYS = {"project_id", "supplier_id", "po_number", "status", "current_revision"}
 
-                # leaving draft -> set '1' unless already numeric >=1
+                # If user asked to bump *and* it's allowed (approved/issued), do a new revision snapshot
+                if bump and bump_allowed:
+                    target_rev = get_next_revision(str(current_rev).strip())
+                    target_rev = _coerce_rev_on_leaving_draft(target_rev, current_status, new_status)
+
+                    # Deactivate old metadata/items for this PO row
+                    deactivate_po_data(po_id)
+
+                    # Build new metadata row for INSERT (clone + overlay)
+                    metadata["project_id"]              = po["project_id"]
+                    metadata["supplier_id"]             = po["supplier_id"]
+                    metadata["po_number"]               = po["po_number"]
+                    metadata["status"]                  = new_status
+                    metadata["current_revision"]        = target_rev
+                    metadata["delivery_address_id"]     = delivery_address_id
+                    metadata["manual_delivery_address"] = None
+
+                    # Create a brand new PO row for the new revision + insert fresh items snapshot
+                    new_po_id = insert_po_bundle(metadata)
+                    for item in line_items:
+                        item["po_id"] = new_po_id
+                    insert_line_items(line_items)
+
+                    flash(f"PO revision created successfully (rev {target_rev}).", "success")
+                    return redirect(url_for("main.po_preview", po_id=new_po_id))
+
+                # Otherwise: NO bump → patch in place and still write the items
+                PO_KEYS = {"project_id", "supplier_id", "po_number", "status", "current_revision"}
                 coerced_rev = _coerce_rev_on_leaving_draft(current_rev, current_status, new_status)
 
                 po_fields = {
@@ -448,6 +468,10 @@ def edit_po(po_id):
 
                 _patch_po(po_id, po_fields)
                 _patch_po_metadata(po_id, md_fields)
+
+                # 🔴 Ensure items are saved on terminal transitions without bump
+                _replace_line_items(po_id, line_items)
+
                 flash(f"Status set to {new_status} (rev {po_fields['current_revision']}).", "success")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
@@ -473,7 +497,7 @@ def edit_po(po_id):
             # ---- PATH C: INSERT new row as a new revision (deactivate old first)
             # 4) Decide the target revision
             if bump:
-                # Explicit bump (e.g., 1 -> 2)
+                # Explicit bump (e.g., a -> b or 1 -> 2)
                 target_rev = get_next_revision(str(current_rev).strip())
             else:
                 # Your rule: originally only Draft -> Approved = "1"; we extend to any move out of draft
@@ -513,6 +537,7 @@ def edit_po(po_id):
             return redirect(url_for("main.edit_po", po_id=po_id))
 
     # ---------------- GET: render edit form (unchanged except statuses list) ----------------
+    from .supabase_client import fetch_po_detail
     po = fetch_po_detail(po_id)
     if not po:
         return render_template("404.html"), 404
@@ -659,10 +684,7 @@ def po_pdf(po_id):
             archive_path=archive_path,
             po=po,                                               # pass the PO dict you already have
             mailbox_upn="purchasing@powersystemservices.co.uk",  # optional; else uses env MS_OUTLOOK_MAILBOX
-            # to_recipients=["orders@supplier.com"],             # optional; else inferred from po
-            # cc_recipients=["buyer@yourco.com"],                # optional
         )
-    # ================================================
 
     # Return PDF inline (unchanged behavior)
     response = make_response(pdf_bytes)
