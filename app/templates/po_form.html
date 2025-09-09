@@ -304,25 +304,78 @@ function caretIndexForDigitCount(str, digits) {
   return str.length;
 }
 
-/* Format with commas while preserving caret position */
+/* Format with commas while preserving caret position (incl. after-decimal typing) */
 function moneyFormatWithCaret(e) {
   const input = e.target;
 
   const prevValue = input.value;
   const prevCaret = input.selectionStart ?? prevValue.length;
-  const prevDigitsBefore = countDigitsBefore(prevValue, prevCaret);
 
-  const numeric = sanitizeToNumeric(prevValue);      // clean raw
-  const formatted = formatNumericString(numeric);    // pretty with commas
+  // Track if caret was after the decimal and how many digits were after it
+  const prevDotIdx = prevValue.indexOf('.');
+  const wasAfterDecimal = prevDotIdx !== -1 && prevCaret > prevDotIdx;
+  let digitsAfterDecimal = 0;
+  if (wasAfterDecimal) {
+    for (let i = prevDotIdx + 1; i < Math.min(prevCaret, prevValue.length); i++) {
+      if (/\d/.test(prevValue[i])) digitsAfterDecimal++;
+    }
+  }
+
+  // Also track how many digits were before the caret (fallback logic)
+  const prevDigitsBefore = (function countDigitsBefore(str, caret) {
+    let c = 0;
+    for (let i = 0; i < Math.min(caret, str.length); i++) {
+      if (/\d/.test(str[i])) c++;
+    }
+    return c;
+  })(prevValue, prevCaret);
+
+  // Clean and format
+  const numeric   = sanitizeToNumeric(prevValue);   // raw like "1234.5"
+  const formatted = formatNumericString(numeric);   // pretty like "1,234.5"
 
   input.value = formatted;
   input.dataset.rawValue = numeric && numeric !== '.' ? numeric : '0';
 
-  const newCaret = caretIndexForDigitCount(formatted, prevDigitsBefore);
+  // Restore caret
+  let newCaret = formatted.length;
+
+  const newDotIdx = formatted.indexOf('.');
+  if (wasAfterDecimal && newDotIdx !== -1) {
+    // Place caret so that the same number of digits remain AFTER the decimal
+    // Scan from the end back to the decimal, counting digits
+    let seen = 0;
+    for (let i = formatted.length - 1; i > newDotIdx; i--) {
+      if (/\d/.test(formatted[i])) {
+        if (seen === digitsAfterDecimal) {
+          // caret should go just after this position
+          newCaret = i + 1;
+          break;
+        }
+        seen++;
+      }
+    }
+    // If we didn't break (e.g., shorter), put caret right after the decimal
+    if (seen < digitsAfterDecimal) newCaret = newDotIdx + 1;
+  } else {
+    // Fallback: keep same number of digits BEFORE the caret
+    let seen = 0;
+    for (let i = 0; i < formatted.length; i++) {
+      if (/\d/.test(formatted[i])) {
+        seen++;
+        if (seen === prevDigitsBefore) {
+          newCaret = i + 1;
+          break;
+        }
+      }
+    }
+  }
+
   try { input.setSelectionRange(newCaret, newCaret); } catch (_) {}
 
   updateTotal();
 }
+
 
 /* Keep formatting on focus; select all if zero so first digit replaces it */
 function moneyFocusStable(e) {
