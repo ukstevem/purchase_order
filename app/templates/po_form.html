@@ -118,6 +118,7 @@
         <option value="FOB" {% if po_data.get('delivery_terms') == 'FOB' %}selected{% endif %}>FOB — Free On Board</option>
         <option value="CFR" {% if po_data.get('delivery_terms') == 'CFR' %}selected{% endif %}>CFR — Cost and Freight</option>
         <option value="CIF" {% if po_data.get('delivery_terms') == 'CIF' %}selected{% endif %}>CIF — Cost, Insurance & Freight</option>
+        <option value="Not Applicable" {% if po_data.get('delivery_terms') == 'N-A' %}selected{% endif %}>Not Applicable</option>
       </select>
     </div>
 
@@ -155,7 +156,7 @@
                 required 
                 rows="1">{{ item.get('description', '') }}</textarea>
           </td>
-          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
+          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="0.01" required oninput="updateTotal()"></td>
           <td><input type="text" name="unit[]" value="{{ item.get('unit', '') }}" placeholder="Unit" required></td>
           <td>
             <div class="money-input-wrap">
