@@ -259,18 +259,54 @@ function addCommas(intStr) {
 }
 
 /* Sanitize to numeric with ≤2 decimals (no £, no commas) */
+/* Sanitize a string to a numeric representation using the **last** typed decimal.
+   - Strips anything except digits and dots
+   - Keeps only the last dot as the decimal separator
+   - Limits to 2 decimal digits
+   - Trims leading zeros in the integer part (but keeps a single 0)
+*/
 function sanitizeToNumeric(str) {
   if (!str) return '';
-  let s = String(str).replace(/[^0-9.]/g, '');
-  const firstDot = s.indexOf('.');
-  if (firstDot !== -1) {
-    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
+
+  // Keep digits and dots only
+  const filtered = String(str).replace(/[^0-9.]/g, '');
+
+  // Where is the LAST dot in what the user typed?
+  const lastDot = filtered.lastIndexOf('.');
+
+  // Remove all dots to get pure digits
+  const digitsOnly = filtered.replace(/\./g, '');
+
+  // If no dot at all, it's just an integer; trim leading zeros
+  if (lastDot === -1) {
+    // Trim leading zeros but keep a single 0 if empty
+    const intPart = digitsOnly.replace(/^0+(?=\d)/, '');
+    return intPart;
   }
-  const parts = s.split('.');
-  parts[0] = parts[0].replace(/^0+(?=\d)/, ''); // trim leading zeros
-  if (parts.length > 1) parts[1] = parts[1].slice(0, 2);
-  return parts.join('.');
+
+  // Count how many digits were before that last dot in the original filtered string
+  // (i.e., how many digits to take for the integer part)
+  // We do this by counting digits up to lastDot (inclusive-exclusive).
+  const beforeDotStr = filtered.slice(0, lastDot);
+  const digitsBeforeDot = (beforeDotStr.match(/\d/g) || []).length;
+
+  // Split digitsOnly accordingly
+  let intDigits = digitsOnly.slice(0, digitsBeforeDot);
+  let decDigits = digitsOnly.slice(digitsBeforeDot);
+
+  // Trim integer leading zeros (but keep one 0 if it would become empty)
+  intDigits = intDigits.replace(/^0+(?=\d)/, '');
+  if (intDigits === '') intDigits = '0';
+
+  // Limit decimals to 2 digits
+  decDigits = decDigits.slice(0, 2);
+
+  // If user typed a dot but no decimals yet, keep the trailing dot (e.g., "123.")
+  if (decDigits.length === 0) return intDigits + '.';
+
+  return intDigits + '.' + decDigits;
 }
+
 
 /* Format numeric string -> "1,234.56" (string) */
 function formatNumericString(numStr) {
