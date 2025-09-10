@@ -156,7 +156,7 @@
                 required 
                 rows="1">{{ item.get('description', '') }}</textarea>
           </td>
-          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="0" required oninput="updateTotal()"></td>
+          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="0" step="0.01" required oninput="updateTotal()"></td>
           <td><input type="text" name="unit[]" value="{{ item.get('unit', '') }}" placeholder="Unit" required></td>
           <td>
             <div class="money-input-wrap">
@@ -233,7 +233,7 @@ function addLineItem() {
     <td>
       <textarea name="description[]" placeholder="Description" rows="1" required></textarea>
     </td>
-    <td><input type="number" name="quantity[]" placeholder="Qty" min="1" required oninput="updateTotal()"></td>
+    <td><input type="number" name="quantity[]" placeholder="Qty" min="0" step="0.01" required oninput="updateTotal()"></td>
     <td><input type="text" name="unit[]" placeholder="Unit" required></td>
     <td>
       <div class="money-input-wrap">

@@ -144,7 +144,7 @@ Printed: {{ now.strftime('%d %b %Y') }}
             <tr>
             <td class="center">{{ loop.index }}</td>
             <td class="col-desc">{{ item.get('description', '') | nl2br }}</td>
-            <td class="center">{{ "{:,.0f}".format(qty) }}</td>
+            <td class="num">{{ "{:,.2f}".format(qty) }}</td>
             <td>{{ item.get('unit')|default('', true) }}</td>
             <td class="num">{{ money_cell(unit_price) }}</td>
             <td class="num">{{ money_cell(line_total) }}</td>

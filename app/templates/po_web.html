@@ -134,7 +134,7 @@
       <tr>
         <td class="col-idx center">{{ loop.index }}</td>
         <td class="col-desc">{{ item.get('description', '') | nl2br }}</td>
-        <td class="col-qty center">{{ "{:,.0f}".format(qty) }}</td>
+        <td class="num">{{ "{:,.2f}".format(qty) }}</td>
         <td class="col-unit">{{ item.get('unit')|default('', true) }}</td>
         <td class="col-price num">{{ money_cell(unit_price) }}</td>
         <td class="col-total num">{{ money_cell(line_total) }}</td>
