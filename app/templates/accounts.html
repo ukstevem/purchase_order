@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+
+{% block content %}
+<h2>Accounts Overview</h2>
+
+<div class="table-scroll">
+  <table class="table accounts">
+        <colgroup>
+            <col class="w-po">
+            <col class="w-proj">
+            <col class="w-supp">
+            <col class="w-status">
+            <col class="w-total">
+            <col class="w-acc">
+            <col class="w-invref">
+        </colgroup>
+    <thead>
+        <tr>
+        <th>PO Number</th>
+        <th>Project Number</th>
+        <th>Supplier</th>
+        <th>Status</th>
+        <th class="num">Total Value</th>
+        <th>Complete</th>
+        <th>Invoice Reference</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for po in po_list %}
+        <tr data-po-id="{{ po.id }}">
+            <td>{{ "%06d"|format(po.po_number) if po.po_number is not none else "" }}</td>
+            <td>{{ po.projectnumber or "" }}</td>
+            <td>{{ po.supplier_name or "" }}</td>
+            <td>{{ po.status or "" }}</td>
+            <td class="num">
+                <span class="money-input-wrap">
+                    <span class="money-input">{{ po.total_value|accounting_number }}</span>
+                </span>
+            </td>
+
+            <!-- Editable: Acc Complete -->
+            <td>
+            <input type="checkbox"
+                    class="acc-complete"
+                    {% if po.acc_complete %}checked{% endif %}>
+            </td>
+
+            <!-- Editable: Invoice Reference -->
+            <td>
+            <input type="text"
+                    class="invoice-ref"
+                    value="{{ po.invoice_reference or '' }}"
+                    placeholder="">
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    </table>
+</div>
+
+<p id="save-toast" style="display:none; font-size:0.9rem; color: var(--nav-muted);">
+  Saving…
+</p>
+
+<script>
+(function () {
+  const toast = document.getElementById('save-toast');
+  let savingTimer = null;
+
+  function showSaving(msg) {
+    if (!toast) return;
+    toast.textContent = msg || 'Saving…';
+    toast.style.display = 'block';
+    clearTimeout(savingTimer);
+    savingTimer = setTimeout(() => (toast.style.display = 'none'), 1200);
+  }
+
+  async function postUpdate(poId, payload) {
+    showSaving('Saving…');
+    const res = await fetch('{{ url_for("accounts.update") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.assign({ id: poId }, payload))
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      console.error('Save failed', data);
+      showSaving('Save failed');
+      return false;
+    }
+    showSaving('Saved');
+    return true;
+  }
+
+  // Checkbox immediate save
+  document.querySelectorAll('input.acc-complete').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const tr = e.target.closest('tr');
+      const poId = tr?.dataset?.poId;
+      if (!poId) return;
+      postUpdate(poId, { acc_complete: e.target.checked });
+    });
+  });
+
+  // Text input: debounce on input and force save on blur
+  const debounce = (fn, ms) => {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  };
+
+  const debouncedSave = debounce((el) => {
+    const tr = el.closest('tr');
+    const poId = tr?.dataset?.poId;
+    if (!poId) return;
+    postUpdate(poId, { invoice_reference: el.value });
+  }, 500);
+
+  document.querySelectorAll('input.invoice-ref').forEach(inp => {
+    inp.addEventListener('input', () => debouncedSave(inp));
+    inp.addEventListener('blur', () => {
+      // Force immediate save on blur (in case debounce hasn’t fired)
+      const tr = inp.closest('tr');
+      const poId = tr?.dataset?.poId;
+      if (!poId) return;
+      postUpdate(poId, { invoice_reference: inp.value });
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -3,8 +3,9 @@ import logging
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from app.utils.filters import format_date, nl2br
+from app.utils.filters import format_date, nl2br, accounting, accounting_number
 from app.routes import email_bp
+from app.blueprints.accounts import accounts_bp
 from dotenv import load_dotenv
 
 # Initialize SQLAlchemy
@@ -42,10 +43,13 @@ def create_app():
     from .routes import main
     app.register_blueprint(main)
     app.register_blueprint(email_bp)
+    app.register_blueprint(accounts_bp)
+
 
     # other setup...
     app.jinja_env.filters["format_date"] = format_date
     app.jinja_env.filters["nl2br"] = nl2br
-
+    app.jinja_env.filters["accounting"] = accounting
+    app.jinja_env.filters["accounting_number"] = accounting_number
     
     return app

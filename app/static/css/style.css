@@ -275,6 +275,29 @@ table.line-items td.money .currency { float: left; } /* £ on the left edge */
   padding-left: 1.2rem; /* space for the £ prefix */
 }
 
+/* Reuse money-input styles for DISPLAY CELLS inside tables */
+.table td.num .money-input-wrap {
+  position: relative;
+  display: block;       /* fill the whole cell width */
+  width: 100%;
+  line-height: 1;       /* baseline alignment for symbol + digits */
+}
+
+.table td.num .money-input-wrap::before {
+  /* you already set content:"£" globally — we just fix alignment */
+  left: 0;
+  top: 0;               /* baseline-friendly; no translateY */
+  transform: none;
+}
+
+.table td.num .money-input {
+  display: block;       /* allows right-align within the full cell width */
+  text-align: right;    /* align numbers so decimals line up */
+  padding-left: 1.8ch;  /* reserved gutter for the £ on the left */
+  font-variant-numeric: tabular-nums; /* monospaced digits for tidy columns */
+}
+
+
 /* Web PO Table */
 table.po-web-items th.col-idx,
 table.po-web-items td.col-idx,
@@ -474,3 +497,31 @@ textarea[name="description[]"] {
   min-height: 1em;   /* shrink default size */
   resize: vertical;  /* allow user to expand if needed */
 }
+
+/* Accounts table column widths */
+/* Container prevents overflow while allowing scroll if truly needed */
+.table-scroll { max-width: 100%; overflow-x: auto; }
+
+/* Make columns fit inside the container: % widths sum to 100% */
+.table.accounts { width: 100%; table-layout: fixed; }
+
+.table.accounts col.w-po     { width: 10%; }  /* PO Number */
+.table.accounts col.w-proj   { width: 10%; }  /* Project Number */
+.table.accounts col.w-supp   { width: 26%; }  /* Supplier */
+.table.accounts col.w-status { width: 12%; }  /* Status */
+/* .table.accounts col.w-total  { width: 14%; }  Total (currency) */
+.table.accounts col.w-acc    { width: 12%;  }  /* Acc Complete */
+.table.accounts col.w-invref { width: 12%; }  /* Invoice Ref */
+
+/* Let long names/refs wrap instead of forcing the table wider */
+.table.accounts th,
+.table.accounts td { white-space: normal; overflow-wrap: anywhere; }
+
+/* Keep numeric column tidy + reuse your money styles */
+.table.accounts td.num, .table.accounts th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.table.accounts td.num .money-input-wrap { display:block; width:100%; position:relative; line-height:1; }
+.table.accounts td.num .money-input-wrap::before { left:0; top:0; transform:none; }
+.table.accounts td.num .money-input { display:block; text-align:right; padding-left:1.8ch; font-variant-numeric: tabular-nums; }
