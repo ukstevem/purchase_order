@@ -28,7 +28,7 @@
   <div style="text-align: right;">
     <h2 style="margin: 0;">Purchase Order</h2>
     <p style="margin: 0;"><strong>PO Number:</strong> {{ "%06d"|format(po['po_number']) }}-{{ po['projects'].get('projectnumber', '') }}</p>
-    <p style="margin: 0;"><strong>PO Date:</strong> {{ now.strftime('%d %b %Y') }}</p>
+    <p style="margin: 0;"><strong>PO Date:</strong> {{ po.get('updated_at')|format_date }}</p>
     <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>
   </div>
 </div>

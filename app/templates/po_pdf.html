@@ -46,7 +46,7 @@ Printed: {{ now.strftime('%d %b %Y') }}
         <strong>PO Number:</strong>
         {{ "%06d"|format(po.get('po_number',0)) }}{% if po.get('projects') and po['projects'].get('projectnumber') %}-{{ po['projects'].get('projectnumber') }}{% endif %}
       </p>
-      <p style="margin: 0;"><strong>PO Date:</strong> {{ now.strftime('%d %b %Y') }}</p>
+      <p style="margin: 0;"><strong>PO Date:</strong> {{ po.get('updated_at')|format_date }}</p>
       <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision','-') }}</p>
     </div>
   </div>
