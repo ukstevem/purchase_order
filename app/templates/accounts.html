@@ -4,6 +4,50 @@
 {% block content %}
 <h2>Accounts Overview</h2>
 
+<form method="get" class="filters" style="display:flex; gap:1rem; align-items:end; flex-wrap:wrap;">
+  <!-- Completed -->
+  <div>
+    <label for="completed">Completed</label>
+    <select id="completed" name="completed" onchange="this.form.submit()">
+      <option value="all"     {{ 'selected' if completed == 'all' else '' }}>All</option>
+      <option value="only"    {{ 'selected' if completed == 'only' else '' }}>Only completed</option>
+      <option value="exclude" {{ 'selected' if completed == 'exclude' else '' }}>Exclude completed</option>
+    </select>
+  </div>
+
+  <!-- Project (by projectnumber) -->
+  <div>
+    <label for="project">Project</label>
+    <select id="project" name="project" onchange="this.form.submit()">
+      <option value="" {{ 'selected' if not selected_project else '' }}>All projects</option>
+      {% for p in project_options %}
+        <option value="{{ p }}" {{ 'selected' if selected_project == p else '' }}>
+          {{ p }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Supplier (by supplier_name) -->
+  <div>
+    <label for="supplier">Supplier</label>
+    <select id="supplier" name="supplier" onchange="this.form.submit()">
+      <option value="" {{ 'selected' if not selected_supplier else '' }}>All suppliers</option>
+      {% for s in supplier_options %}
+        <option value="{{ s }}" {{ 'selected' if selected_supplier == s else '' }}>
+          {{ s }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <a class="btn btn-light" href="{{ url_for('accounts.index') }}">Reset</a>
+  </div>
+</form>
+
+
+
 <div class="table-scroll">
   <table class="table accounts">
         <colgroup>
