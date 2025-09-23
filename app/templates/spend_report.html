@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Spend Report{% endblock %}
+
+{% block content %}
+<h2>Purchase Order spend per project (Rolling 12 Months)</h2>
+
+<div class="table-wrap">
+  <table class="table table-striped pivot compact">
+    <colgroup>
+      <col style="width: 8ch;">           <!-- Project -->
+      {% for m in months %}<col style="width: 9ch;">{% endfor %}  <!-- Months -->
+      <col style="width: 11ch;">           <!-- Total -->
+    </colgroup>
+
+    <thead>
+      <tr>
+        <th class="sticky-left">Project</th>
+        {% for m in months %}
+          <th class="num">{{ m | format_date("%b %Y") }}</th>
+        {% endfor %}
+        <th class="num sticky-right">Total</th>
+      </tr>
+    </thead>
+
+    <tbody>
+        {% for project in project_order %}
+        {% set spends = data[project] %}
+        <tr>
+            <td class="sticky-left proj">{{ project }}</td>
+            {% for m in months %}
+            <td class="num">{{ (spends.get(m, 0) or 0) | accounting }}</td>
+            {% endfor %}
+            <td class="num sticky-right total">{{ (row_totals[project] or 0) | accounting }}</td>
+        </tr>
+        {% endfor %}
+
+        <tr class="grand">
+            <td class="sticky-left">Total</td>
+            {% for m in months %}
+            <td class="num">{{ (col_totals[m] or 0) | accounting }}</td>
+            {% endfor %}
+            <td class="num sticky-right total">{{ (grand_total or 0) | accounting }}</td>
+        </tr>
+    </tbody>
+
+  </table>
+</div>
+
+<style>
+  /* wrapper enables horizontal scroll when needed */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  /* let the table be as wide as it needs; no forced squish */
+  table.pivot { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+
+  /* compact spacing for numeric matrix */
+  table.pivot.compact th,
+  table.pivot.compact td { padding: 6px 10px; font-size: 0.92rem; }
+
+  /* right-aligned numeric cells */
+  .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* sticky edges */
+  .sticky-left,
+  .sticky-right,
+  thead th { position: sticky; z-index: 2; background: #fff; }
+
+  thead th { top: 0; box-shadow: inset 0 -1px 0 #e6e6e6; }
+
+  .sticky-left { left: 0; z-index: 3; box-shadow: 1px 0 0 #eee; }
+  .sticky-right { right: 0; z-index: 3; box-shadow: -1px 0 0 #eee; }
+
+  /* subtle emphasis for totals */
+  td.total { font-weight: 600; }
+  tr.grand td { font-weight: 700; border-top: 2px solid #000; }
+
+  /* keep long project names readable without blowing up row height */
+  td.proj { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 32ch; }
+</style>
+{% endblock %}

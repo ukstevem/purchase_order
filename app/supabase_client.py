@@ -61,7 +61,6 @@ def _is_uuid(val):
     except Exception:
         return False
 
-
 # ------------------------------
 # Fetchers
 # ------------------------------
@@ -104,6 +103,103 @@ def fetch_delivery_contacts():
     r = requests.get(url, headers=get_headers(False), params=params, timeout=30)
     r.raise_for_status()
     return r.json()
+
+# --- Spend report helpers ---
+
+def fetch_projects_map():
+    """
+    Returns { project_id(uuid): {"projectnumber": str, "projectdescription": str} }
+    """
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/projects"
+    params = {
+        "select": "id,projectnumber,projectdescription",
+        "order": "projectnumber.asc",
+        "limit": 10000,
+    }
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    resp.raise_for_status()
+    rows = resp.json() or []
+    return {r["id"]: {"projectnumber": r["projectnumber"], "projectdescription": r["projectdescription"]} for r in rows}
+
+
+def fetch_purchase_orders_since(first_month_start_iso: str, next_month_start_iso: str):
+    """
+    Fetch POs within [first_month_start_iso, next_month_start_iso) for statuses approved/issued/complete.
+    Returns rows ordered so the first row per po_number is the latest revision.
+    """
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/purchase_orders"
+
+    # Use a list of (key, value) tuples so we can repeat 'updated_at' twice.
+    params = [
+        ("select", "id,project_id,po_number,updated_at,total_value,status"),
+        ("status", "in.(approved,issued,complete)"),
+        ("updated_at", f"gte.{first_month_start_iso}"),
+        ("updated_at", f"lt.{next_month_start_iso}"),
+        ("order", "po_number.asc,updated_at.desc"),
+        ("limit", "100000"),
+    ]
+
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    resp.raise_for_status()
+    return resp.json() or []
+
+# --- Spend report (via accounts_overview) ---
+
+def fetch_accounts_overview_latest(statuses=("approved", "issued", "complete")):
+    """
+    Get latest-only PO rows from the accounts_overview view with total_value pre-aggregated.
+    Returns [{id, po_number, status, projectnumber, supplier_name, total_value, acc_complete, invoice_reference}]
+    """
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/accounts_overview"
+    status_list = ",".join(statuses)
+    params = [
+        ("select", "id,po_number,status,projectnumber,supplier_name,total_value"),
+        ("status", f"in.({status_list})"),
+        ("limit", "100000"),
+        ("order", "po_number.asc"),  # stable ordering
+    ]
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    if resp.status_code >= 400:
+        current_app.logger.error("❌ fetch_accounts_overview_latest: %s", resp.text)
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+def fetch_po_updated_at_for_ids_in_window(ids: list[str], first_month_start_iso: str, next_month_start_iso: str):
+    """
+    For a set of PO ids, fetch updated_at within [first_month_start, next_month_start).
+    Returns [{id, updated_at}] for those that fall inside the window.
+    Uses RFC3339 timestamps to satisfy timestamptz comparisons.
+    """
+    if not ids:
+        return []
+
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/purchase_orders"
+
+    # Build id IN (...) list (comma-separated, no spaces)
+    in_list = ",".join(ids)
+
+    gte = f"{first_month_start_iso}T00:00:00Z"
+    lt  = f"{next_month_start_iso}T00:00:00Z"
+
+    params = [
+        ("select", "id,updated_at"),
+        ("id", f"in.({in_list})"),
+        ("updated_at", f"gte.{gte}"),
+        ("updated_at", f"lt.{lt}"),
+        ("limit", "100000"),
+        ("order", "updated_at.asc"),
+    ]
+
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    if resp.status_code >= 400:
+        current_app.logger.error("❌ fetch_po_updated_at_for_ids_in_window: %s", resp.text)
+    resp.raise_for_status()
+    return resp.json() or []
 
 
 # ------------------------------

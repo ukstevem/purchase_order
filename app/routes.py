@@ -854,3 +854,91 @@ def advance_revision(po_id):
         flash("Failed to bump revision.", "error")
         return redirect(url_for("main.edit_po", po_id=po_id))
 
+@main.route("/spend-report")
+def spend_report():
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    from flask import render_template
+    from app.supabase_client import (
+        fetch_accounts_overview_latest,
+        fetch_po_updated_at_for_ids_in_window,
+    )
+    import re
+
+    def _natural_key(s: str):
+        # splits “P123-01” into ["P", 123, "-", 1] so numbers sort numerically
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s or "")]
+
+
+    # ---- Rolling 12 months (Europe/London), oldest -> newest (current month far right) ----
+    tz = ZoneInfo("Europe/London")
+    now_local = datetime.now(tz).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    months = []
+    y, m = now_local.year, now_local.month
+    for i in range(11, -1, -1):
+        yy, mm = y, m - (11 - i)
+        while mm <= 0:
+            mm += 12
+            yy -= 1
+        months.append(f"{yy:04d}-{mm:02d}-01")
+    first_month_start = months[0]
+    next_month_year, next_month = (y + 1, 1) if m == 12 else (y, m + 1)
+    next_month_start = f"{next_month_year:04d}-{next_month:02d}-01"
+
+    months = sorted(months)  # "YYYY-MM-01" sorts lexicographically in date order
+
+    # ---- 1) Latest-only rows with totals from accounts_overview ----
+    ao_rows = fetch_accounts_overview_latest(statuses=("approved", "issued", "complete"))
+    ao_by_id = {r["id"]: r for r in ao_rows}
+    latest_ids = list(ao_by_id.keys())
+
+    # ---- 2) For those latest IDs, get updated_at in our window ----
+    po_rows = fetch_po_updated_at_for_ids_in_window(latest_ids, first_month_start, next_month_start)
+    # Map id -> month key ("YYYY-MM-01") for rows inside window
+    id_to_month = {}
+    for r in po_rows:
+        updated_at = r.get("updated_at")
+        if not updated_at:
+            continue
+        mkey = str(updated_at)[:7] + "-01"
+        if mkey in months:
+            id_to_month[r["id"]] = mkey
+
+    # ---- 3) Pivot: rows = project (projectnumber), cols = months, val = total_value ----
+    data = {}
+    for po_id, mkey in id_to_month.items():
+        ao = ao_by_id.get(po_id)
+        if not ao:
+            continue
+        project = ao.get("projectnumber") or "—"
+        total_val = float(ao.get("total_value") or 0.0)
+        if total_val == 0.0:
+            # keep or drop zeros; choose your preference. Drop to keep the table tidy:
+            continue
+        data.setdefault(project, {}).setdefault(mkey, 0.0)
+        data[project][mkey] += total_val
+
+    project_order = sorted(data.keys(), key=_natural_key)
+
+    # ---- Totals ----
+    row_totals = {}
+    col_totals = {m: 0.0 for m in months}
+    grand_total = 0.0
+
+    for proj, spends in data.items():
+        total = sum(spends.get(m, 0.0) for m in months)
+        row_totals[proj] = total
+        grand_total += total
+        for m in months:
+            col_totals[m] += spends.get(m, 0.0)
+
+    return render_template(
+        "spend_report.html",
+        months=months,
+        data=data,
+        project_order=project_order,
+        row_totals=row_totals,
+        col_totals=col_totals,
+        grand_total=grand_total,
+    )

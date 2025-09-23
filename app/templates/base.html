@@ -32,6 +32,9 @@
              
           <a class="nav-link {% if request.endpoint == 'accounts.index' %}active{% endif %}" 
              href="{{ url_for('accounts.index') }}">Accounts</a>
+          
+         <a class="nav-link {% if request.endpoint == 'main.spend_report' %}active{% endif %}" 
+             href="{{ url_for('main.spend_report') }}">Spend Report</a>
         </nav>
       </div>
     </header>
