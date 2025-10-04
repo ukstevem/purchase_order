@@ -525,3 +525,34 @@ textarea[name="description[]"] {
 .table.accounts td.num .money-input-wrap { display:block; width:100%; position:relative; line-height:1; }
 .table.accounts td.num .money-input-wrap::before { left:0; top:0; transform:none; }
 .table.accounts td.num .money-input { display:block; text-align:right; padding-left:1.8ch; font-variant-numeric: tabular-nums; }
+
+/* Spend table: tone down month drill-down links */
+.table.pivot .num a.drill-link {
+  color: inherit;                  /* no bright blue */
+  text-decoration: none;           /* remove underline */
+  border-bottom: 1px dotted transparent; /* very subtle affordance */
+  padding-bottom: 1px;
+}
+
+.table.pivot .num a.drill-link:hover,
+.table.pivot .num a.drill-link:focus {
+  border-bottom-color: currentColor;     /* show on hover/focus only */
+}
+
+.table.pivot .num a.drill-link:visited {
+  color: inherit;                  /* keep consistent after visiting */
+}
+
+/* Keyboard accessibility */
+.table.pivot .num a.drill-link:focus-visible {
+  outline: 2px solid rgba(0, 0, 0, 0.25);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Optional: slightly dim non-zero link to hint interactivity without shouting */
+/*
+.table.pivot .num a.drill-link { opacity: 0.9; }
+.table.pivot .num a.drill-link:hover,
+.table.pivot .num a.drill-link:focus { opacity: 1; }
+*/

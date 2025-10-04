@@ -40,7 +40,8 @@
         </td>
         <td>{{ po.current_revision }}</td>
         <td>
-          <a href="{{ url_for('main.po_preview', po_id=po.purchase_order_id) }}">View PO</a>
+           {% set po_id = po.id or po.purchase_order_id %}
+          <a class="btn btn-small" href="/po/{{ po_id }}">View PO</a>
         </td>
       </tr>
       {% endfor %}

@@ -106,6 +106,48 @@ def fetch_delivery_contacts():
 
 # --- Spend report helpers ---
 
+def fetch_last_issued_dates(po_numbers: list[str], first_month_start_iso: str, next_month_start_iso: str):
+    """
+    For the given po_numbers, fetch rows where status='issued' and updated_at is within the window,
+    ordered so the FIRST seen per po_number is the *latest* issued row in that window.
+    Returns dict { po_number: updated_at_iso }.
+    """
+    if not po_numbers:
+        return {}
+
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/purchase_orders"
+
+    # Build in.(...) list with no spaces
+    in_list = ",".join(po_numbers)
+
+    gte = f"{first_month_start_iso}T00:00:00Z"
+    lt  = f"{next_month_start_iso}T00:00:00Z"
+
+    params = [
+        ("select", "po_number,updated_at"),
+        ("po_number", f"in.({in_list})"),
+        ("status", "eq.issued"),
+        ("updated_at", f"gte.{gte}"),
+        ("updated_at", f"lt.{lt}"),
+        # Order by po_number, then latest updated_at first so we can take first per key
+        ("order", "po_number.asc,updated_at.desc"),
+        ("limit", "100000"),
+    ]
+
+    r = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    if r.status_code >= 400:
+        current_app.logger.error("❌ fetch_last_issued_dates: %s", r.text)
+    r.raise_for_status()
+    rows = r.json() or []
+
+    latest_issued = {}
+    for row in rows:
+        pn = row.get("po_number")
+        if pn and pn not in latest_issued:
+            latest_issued[pn] = row.get("updated_at")  # ISO timestamp
+    return latest_issued
+
 def fetch_projects_map():
     """
     Returns { project_id(uuid): {"projectnumber": str, "projectdescription": str} }
@@ -146,6 +188,55 @@ def fetch_purchase_orders_since(first_month_start_iso: str, next_month_start_iso
     return resp.json() or []
 
 # --- Spend report (via accounts_overview) ---
+
+def fetch_pos_from_po_table(project_id=None, date_from=None, date_to=None,
+                            statuses=None, order_by="updated_at.desc"):
+    """
+    Query purchase_orders directly and embed related fields.
+    - project_id: UUID from projects.id
+    - date_from/date_to: 'YYYY-MM-DD' (half-open [from,to))
+    - statuses: list like ["approved","issued","complete"]
+    - order_by: PostgREST order param
+    """
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/purchase_orders"
+
+    params = {
+        "select": "id,po_number,reference,status,current_revision,project_id,updated_at,"
+                  "projects(projectnumber),suppliers(name)"
+    }
+    if order_by:
+        params["order"] = order_by
+
+    # Build and=(...) so we avoid duplicate param keys
+    parts = []
+    if project_id:
+        parts.append(f"project_id.eq.{project_id}")
+    if date_from:
+        # add 'Z' if updated_at is timestamptz in your schema
+        parts.append(f"updated_at.gte.{date_from}T00:00:00")
+    if date_to:
+        parts.append(f"updated_at.lt.{date_to}T00:00:00")
+    if statuses:
+        parts.append(f"status.in.({','.join(statuses)})")
+
+    if parts:
+        params["and"] = f"({','.join(parts)})"
+
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    resp.raise_for_status()
+    rows = resp.json() or []
+
+    # Flatten embeds so templates can use projectnumber / supplier_name directly
+    for r in rows:
+        proj = r.pop("projects", None)
+        supp = r.pop("suppliers", None)
+        if isinstance(proj, dict):
+            r["projectnumber"] = proj.get("projectnumber")
+        if isinstance(supp, dict):
+            r["supplier_name"] = supp.get("name")
+    return rows
+
 
 def fetch_accounts_overview_latest(statuses=("approved", "issued", "complete")):
     """
@@ -201,62 +292,100 @@ def fetch_po_updated_at_for_ids_in_window(ids: list[str], first_month_start_iso:
     resp.raise_for_status()
     return resp.json() or []
 
+def fetch_pos_latest_from_po_table(project_id=None, date_from=None, date_to=None,
+                                   statuses=None, order_by="updated_at.desc"):
+    """
+    Query purchase_orders (base) and inner-join to po_metadata(active=true)
+    so we only return the 'latest' version for each PO.
+
+    Filters:
+      - project_id: UUID (projects.id)
+      - date_from/date_to: 'YYYY-MM-DD' (half-open [from, to))
+      - statuses: list like ["approved","issued","complete"]
+    """
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/purchase_orders"
+
+    # Embed projectnumber & supplier name; inner-join to po_metadata to enforce active=true
+    params = {
+        "select": (
+            "id,po_number,reference,status,current_revision,project_id,updated_at,"
+            "projects(projectnumber),suppliers(name),"
+            "po_metadata!inner(id)"  # inner join, we don't need fields—id is enough
+        ),
+        # ensure only rows where the joined po_metadata row is active
+        "po_metadata.active": "is.true",
+    }
+    if order_by:
+        params["order"] = order_by
+
+    # Build AND clause for top-level filters
+    parts = []
+    if project_id:
+        parts.append(f"project_id.eq.{project_id}")
+    if date_from:
+        parts.append(f"updated_at.gte.{date_from}T00:00:00")  # add 'Z' if timestamptz
+    if date_to:
+        parts.append(f"updated_at.lt.{date_to}T00:00:00")
+    if statuses:
+        parts.append(f"status.in.({','.join(statuses)})")
+
+    if parts:
+        params["and"] = f"({','.join(parts)})"
+
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    resp.raise_for_status()
+    rows = resp.json() or []
+
+    # Flatten embeds for template convenience
+    for r in rows:
+        proj = r.pop("projects", None)
+        supp = r.pop("suppliers", None)
+        if isinstance(proj, dict):
+            r["projectnumber"] = proj.get("projectnumber")
+        if isinstance(supp, dict):
+            r["supplier_name"] = supp.get("name")
+    return rows
+
 
 # ------------------------------
 # Delivery Contacts
 # ------------------------------
 
-def insert_delivery_contact(contact: dict) -> str:
+def fetch_last_issued_dates_any(po_numbers: list[str]) -> dict[str, str]:
     """
-    Insert a delivery contact and return its UUID.
-
-    Accepted keys:
-      name (req), email (req), phone (opt), address_id (req, UUID), active (opt -> True)
-    Also tolerates callers passing 'manual_contact_*' + 'delivery_address_id' and normalizes them.
+    For the given po_numbers, fetch ALL rows where status='issued',
+    ordered so the FIRST seen per po_number is the latest issued row overall.
+    Returns dict { po_number: updated_at_iso }.
     """
-    # Backwards-compat: normalize manual_* payloads if present
-    if any(k in contact for k in ("manual_contact_name", "manual_contact_email", "manual_contact_phone", "delivery_address_id")):
-        contact = {
-            "name":       contact.get("manual_contact_name"),
-            "email":      contact.get("manual_contact_email"),
-            "phone":      contact.get("manual_contact_phone"),
-            "address_id": contact.get("delivery_address_id"),
-            "active":     contact.get("active", True),
-        }
-
-    payload = {
-        "name":       _clean(contact.get("name")),
-        "email":      _clean(contact.get("email")),
-        "phone":      _clean(contact.get("phone")),
-        "address_id": contact.get("address_id"),
-        "active":     bool(contact.get("active", True)),
-    }
-
-    # Validate required
-    if not payload["name"] or not payload["email"]:
-        raise ValueError("insert_delivery_contact requires non-empty 'name' and 'email'.")
-    if not payload["address_id"] or not _is_uuid(payload["address_id"]):
-        raise ValueError("insert_delivery_contact requires a valid UUID 'address_id' (Delivery Address dropdown).")
+    if not po_numbers:
+        return {}
 
     base, _ = _get_supabase_auth()
-    url = f"{base}/rest/v1/delivery_contacts"
-    headers = get_headers()
+    url = f"{base}/rest/v1/purchase_orders"
 
-    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    in_list = ",".join(str(p) for p in po_numbers)  # comma separated, no spaces
 
-    if resp.status_code >= 400:
-        try:
-            err = resp.json()
-        except Exception:
-            err = {"body": resp.text}
-        current_app.logger.error("❌ delivery_contacts insert failed %s: %s | payload=%s",
-                                 resp.status_code, err, payload)
-    resp.raise_for_status()
+    params = [
+        ("select", "po_number,updated_at"),
+        ("po_number", f"in.({in_list})"),
+        ("status", "eq.issued"),
+        ("order", "po_number.asc,updated_at.desc"),
+        ("limit", "100000"),
+    ]
 
-    data = resp.json()
-    if not data or "id" not in data[0]:
-        raise RuntimeError("delivery_contacts insert returned no id.")
-    return data[0]["id"]
+    r = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    if r.status_code >= 400:
+        current_app.logger.error("❌ fetch_last_issued_dates_any: %s", r.text)
+    r.raise_for_status()
+    rows = r.json() or []
+
+    latest_issued = {}
+    for row in rows:
+        pn = str(row.get("po_number"))
+        if pn and pn not in latest_issued:
+            latest_issued[pn] = row.get("updated_at")
+    return latest_issued
 
 
 def _extract_manual_delivery_contact(data: dict) -> dict | None:
@@ -386,12 +515,27 @@ def fetch_all_pos(project_id=None):
     return resp.json()
 
 
-def fetch_active_pos(project_id=None):
+def fetch_active_pos(project_id=None, date_from=None, date_to=None, order_by="updated_at.desc"):
+    import requests
+
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/active_po_list"
+
     params = {"select": "*"}
+    if order_by:
+        params["order"] = order_by
+
+    # Build AND clause in PostgREST format: and=(col.op.val,col.op.val,...)
+    parts = []
     if project_id:
-        params["project_id"] = f"eq.{project_id}"
+        parts.append(f"project_id.eq.{project_id}")
+    if date_from:
+        parts.append(f"updated_at.gte.{date_from}T00:00:00")
+    if date_to:
+        parts.append(f"updated_at.lt.{date_to}T00:00:00")
+
+    if parts:
+        params["and"] = f"({','.join(parts)})"
 
     resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
     resp.raise_for_status()

@@ -10,7 +10,7 @@
     <colgroup>
       <col style="width: 8ch;">           <!-- Project -->
       {% for m in months %}<col style="width: 9ch;">{% endfor %}  <!-- Months -->
-      <col style="width: 11ch;">           <!-- Total -->
+      <col style="width: 11ch;">          <!-- Total -->
     </colgroup>
 
     <thead>
@@ -24,26 +24,66 @@
     </thead>
 
     <tbody>
-        {% for project in project_order %}
+      {% for project in project_order %}
         {% set spends = data[project] %}
         <tr>
-            <td class="sticky-left proj">{{ project }}</td>
-            {% for m in months %}
-            <td class="num">{{ (spends.get(m, 0) or 0) | accounting }}</td>
-            {% endfor %}
-            <td class="num sticky-right total">{{ (row_totals[project] or 0) | accounting }}</td>
+          <td class="sticky-left proj">{{ project }}</td>
+
+          {% for m in months %}
+            {% set val = (spends.get(m, 0) or 0) %}
+            <td class="num">
+              {% if val %}
+                <a class="drill-link"
+                   href="{{ url_for('main.po_list',
+                                    projectnumber=project,
+                                    **{'from': month_from[m], 'to': month_to[m]}) }}"
+                   title="Show POs for {{ project }} in {{ m | format_date('%B %Y') }}">
+                  {{ val | accounting }}
+                </a>
+              {% else %}
+                {{ val | accounting }}
+              {% endif %}
+            </td>
+          {% endfor %}
+
+          {# Optional: link the row total to project-only filter #}
+          <td class="num sticky-right total">
+            {% set row_total = (row_totals[project] or 0) %}
+            {% if row_total %}
+              <a class="drill-link"
+                 href="{{ url_for('main.po_list', projectnumber=project) }}"
+                 title="Show all POs for {{ project }}">
+                {{ row_total | accounting }}
+              </a>
+            {% else %}
+              {{ row_total | accounting }}
+            {% endif %}
+          </td>
         </tr>
+      {% endfor %}
+
+      <tr class="grand">
+        <td class="sticky-left">Total</td>
+
+        {# Optional: link column totals to month-only filter across all projects #}
+        {% for m in months %}
+          {% set ctot = (col_totals[m] or 0) %}
+          <td class="num">
+            {% if ctot %}
+              <a class="drill-link"
+                 href="{{ url_for('main.po_list', **{'from': month_from[m], 'to': month_to[m]}) }}"
+                 title="Show all POs in {{ m | format_date('%B %Y') }}">
+                {{ ctot | accounting }}
+              </a>
+            {% else %}
+              {{ ctot | accounting }}
+            {% endif %}
+          </td>
         {% endfor %}
 
-        <tr class="grand">
-            <td class="sticky-left">Total</td>
-            {% for m in months %}
-            <td class="num">{{ (col_totals[m] or 0) | accounting }}</td>
-            {% endfor %}
-            <td class="num sticky-right total">{{ (grand_total or 0) | accounting }}</td>
-        </tr>
+        <td class="num sticky-right total">{{ (grand_total or 0) | accounting }}</td>
+      </tr>
     </tbody>
-
   </table>
 </div>
 
@@ -83,5 +123,25 @@
 
   /* keep long project names readable without blowing up row height */
   td.proj { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 32ch; }
+
+  /* --- toned-down link style for spend values --- */
+  .table.pivot .num a.drill-link {
+    color: inherit;                 /* no bright blue */
+    text-decoration: none;          /* remove underline */
+    border-bottom: 1px dotted transparent; /* subtle affordance on hover/focus only */
+    padding-bottom: 1px;
+  }
+  .table.pivot .num a.drill-link:hover,
+  .table.pivot .num a.drill-link:focus {
+    border-bottom-color: currentColor;
+  }
+  .table.pivot .num a.drill-link:visited {
+    color: inherit;
+  }
+  .table.pivot .num a.drill-link:focus-visible {
+    outline: 2px solid rgba(0, 0, 0, 0.25);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
 </style>
 {% endblock %}

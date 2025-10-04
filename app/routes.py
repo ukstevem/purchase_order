@@ -1,8 +1,16 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response, jsonify, current_app
-from app.supabase_client import fetch_suppliers, fetch_delivery_addresses, fetch_projects, insert_po_bundle, insert_line_items, fetch_delivery_contacts
+from app.supabase_client import (
+    fetch_suppliers, 
+    fetch_delivery_addresses, 
+    fetch_projects, 
+    insert_po_bundle, 
+    insert_line_items, 
+    fetch_delivery_contacts,
+    fetch_pos_latest_from_po_table
+    )
 from app.utils.forms import parse_po_form
 from app.utils.project_filter import get_project_id_by_number
-from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary
+from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary, fetch_last_issued_dates_any, fetch_accounts_overview_latest
 from app.utils.status_utils import (
     allowed_next_statuses, 
     is_forward_or_same, 
@@ -61,20 +69,53 @@ def index():
 def home_redirect():
     return redirect(url_for("main.index"))
 
+
 @main.route("/po-list")
 def po_list():
-    projectnumber = request.args.get("projectnumber")
-    project_id = None
-    try:
-        if projectnumber:
-            project_id = get_project_id_by_number(projectnumber)
+    from flask import request, render_template, flash, current_app
 
-        pos = fetch_active_pos(project_id=project_id)
+    projectnumber = request.args.get("projectnumber")
+    date_from = request.args.get("from")    # YYYY-MM-DD inclusive
+    date_to   = request.args.get("to")      # YYYY-MM-DD exclusive
+
+    # NEW: sorting inputs (defaults to PO number, newest first)
+    sort = request.args.get("sort", "po_number")
+    dir_ = request.args.get("dir", "desc").lower()
+
+    # whitelist to avoid invalid PostgREST order columns
+    allowed_sorts = {"po_number", "updated_at"}
+    if sort not in allowed_sorts:
+        sort = "po_number"
+    dir_ = "asc" if dir_ == "asc" else "desc"
+
+    order_by = f"{sort}.{dir_}"
+
+    try:
+        project_id = get_project_id_by_number(projectnumber) if projectnumber else None
+        current_app.logger.info(f"🧪 project ID lookup result: {project_id}")
+
+        pos = fetch_pos_latest_from_po_table(
+            project_id=project_id,
+            date_from=date_from,
+            date_to=date_to,
+            statuses=["approved", "issued", "complete"],
+            order_by=order_by,  # ← sorted by PO number or updated_at
+        )
     except Exception as e:
         flash(f"Failed to load POs: {e}", "danger")
         pos = []
 
-    return render_template("po_list.html", pos=pos, projectnumber=projectnumber)
+    return render_template(
+        "po_list.html",
+        pos=pos,
+        projectnumber=projectnumber,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        dir=dir_,
+    )
+
+
 
 @main.route("/po/<po_id>")
 def po_preview(po_id):
@@ -858,19 +899,9 @@ def advance_revision(po_id):
 def spend_report():
     from zoneinfo import ZoneInfo
     from datetime import datetime
-    from flask import render_template
-    from app.supabase_client import (
-        fetch_accounts_overview_latest,
-        fetch_po_updated_at_for_ids_in_window,
-    )
     import re
 
-    def _natural_key(s: str):
-        # splits “P123-01” into ["P", 123, "-", 1] so numbers sort numerically
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s or "")]
-
-
-    # ---- Rolling 12 months (Europe/London), oldest -> newest (current month far right) ----
+    # ---- Rolling 12 months (chronological; current month last) ----
     tz = ZoneInfo("Europe/London")
     now_local = datetime.now(tz).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -882,56 +913,66 @@ def spend_report():
             mm += 12
             yy -= 1
         months.append(f"{yy:04d}-{mm:02d}-01")
+    months = sorted(months)  # ensures current month is last
     first_month_start = months[0]
     next_month_year, next_month = (y + 1, 1) if m == 12 else (y, m + 1)
     next_month_start = f"{next_month_year:04d}-{next_month:02d}-01"
 
-    months = sorted(months)  # "YYYY-MM-01" sorts lexicographically in date order
+    # ---- Build month boundaries for linking (from / to) ----
+    def _next_month_key(mkey: str) -> str:
+        # mkey is "YYYY-MM-01"
+        y = int(mkey[0:4])
+        m = int(mkey[5:7])
+        ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+        return f"{ny:04d}-{nm:02d}-01"
 
-    # ---- 1) Latest-only rows with totals from accounts_overview ----
+    month_from = {m: m for m in months}
+    month_to = {m: _next_month_key(m) for m in months}
+
+    # ---- Latest-only totals from accounts_overview ----
     ao_rows = fetch_accounts_overview_latest(statuses=("approved", "issued", "complete"))
-    ao_by_id = {r["id"]: r for r in ao_rows}
-    latest_ids = list(ao_by_id.keys())
+    by_po_number = {str(r["po_number"]): r for r in ao_rows if r.get("po_number") is not None}
+    po_numbers = list(by_po_number.keys())
 
-    # ---- 2) For those latest IDs, get updated_at in our window ----
-    po_rows = fetch_po_updated_at_for_ids_in_window(latest_ids, first_month_start, next_month_start)
-    # Map id -> month key ("YYYY-MM-01") for rows inside window
-    id_to_month = {}
-    for r in po_rows:
-        updated_at = r.get("updated_at")
-        if not updated_at:
+    # Get latest issued per PO (no date filter); THEN apply the 12-month window here
+    last_issued = fetch_last_issued_dates_any(po_numbers)
+
+    # Map pn -> month key
+    pn_to_month = {}
+    for pn, issued_dt in last_issued.items():
+        if not issued_dt:
             continue
-        mkey = str(updated_at)[:7] + "-01"
+        mkey = str(issued_dt)[:7] + "-01"
+        # only keep if inside our rolling 12 months
         if mkey in months:
-            id_to_month[r["id"]] = mkey
+            pn_to_month[pn] = mkey
 
-    # ---- 3) Pivot: rows = project (projectnumber), cols = months, val = total_value ----
+    # Build pivot using totals from latest row in accounts_overview
     data = {}
-    for po_id, mkey in id_to_month.items():
-        ao = ao_by_id.get(po_id)
+    for pn, mkey in pn_to_month.items():
+        ao = by_po_number.get(pn)
         if not ao:
             continue
         project = ao.get("projectnumber") or "—"
         total_val = float(ao.get("total_value") or 0.0)
-        if total_val == 0.0:
-            # keep or drop zeros; choose your preference. Drop to keep the table tidy:
-            continue
         data.setdefault(project, {}).setdefault(mkey, 0.0)
         data[project][mkey] += total_val
-
-    project_order = sorted(data.keys(), key=_natural_key)
 
     # ---- Totals ----
     row_totals = {}
     col_totals = {m: 0.0 for m in months}
     grand_total = 0.0
-
     for proj, spends in data.items():
         total = sum(spends.get(m, 0.0) for m in months)
         row_totals[proj] = total
         grand_total += total
         for m in months:
             col_totals[m] += spends.get(m, 0.0)
+
+    # ---- Natural sort by project number ----
+    def _natural_key(s: str):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s or "")]
+    project_order = sorted(data.keys(), key=_natural_key)
 
     return render_template(
         "spend_report.html",
@@ -941,4 +982,7 @@ def spend_report():
         row_totals=row_totals,
         col_totals=col_totals,
         grand_total=grand_total,
+        month_from=month_from,   # <-- added
+        month_to=month_to        # <-- added
     )
+
