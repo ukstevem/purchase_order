@@ -15,15 +15,26 @@
   <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
   
   <!-- Project -->
-  <label for="project_id">Project</label>
-  <select name="project_id" required>
+  <!-- <label for="project_id">Project</label>
+  <select id="project_id" name="project_id" required>
     {% for project in projects %}
-      <option value="{{ project.id }}"
-        {% if po_data.get('project_id') == project.id %} selected {% endif %}>
-        {{ project.projectnumber }} - {{ project.projectdescription }}
+      {# value is the projectnumber; selected compares to po_data.project_id (also a projectnumber) #}
+      <option value="{{ project.projectnumber }}"
+        {% if po_data.get('project_id') == project.projectnumber %}selected{% endif %}>
+        {{ project.projectnumber }}{% if project.projectdescription %} - {{ project.projectdescription }}{% endif %}
+      </option>
+    {% endfor %}
+  </select> -->
+  <label for="project_combo">Project / Item</label>
+  <select id="project_combo" name="project_combo" required>
+    <option value="">-- Select Project / Item --</option>
+    {% for o in project_items %}
+      <option value="{{ o.projectnumber }}:{{ o.item_seq }}">
+        {{ o.option_label }}
       </option>
     {% endfor %}
   </select>
+
 
   <!-- Supplier -->
   <label for="supplier_id">Supplier</label>

@@ -38,17 +38,23 @@ Printed: {{ now.strftime('%d %b %Y') }}
       <img src="{{ url_for('static', filename='img/PSS_Standard_RGB.png') }}" alt="Logo" style="height: 150px;">
     {% endif %}
 
-    <span class="po-number" style="visibility:hidden">{{ "%06d"|format(po.get('po_number',0)) }}</span>
+    <span class="po-number" style="visibility:hidden">
+      {{ "%06d"|format(po.get('po_number', 0)) }}
+    </span>
 
     <div style="text-align: right;">
       <h2 style="margin: 0;">Purchase Order</h2>
       <p style="margin: 0;">
         <strong>PO Number:</strong>
-        {{ "%06d"|format(po.get('po_number',0)) }}{% if po.get('projects') and po['projects'].get('projectnumber') %}-{{ po['projects'].get('projectnumber') }}{% endif %}
+        {{ "%06d"|format(po.get('po_number', 0)) }}
+        {# append -<projectnumber> if present #}
+        {% set projnum = po.get('projectnumber') or po.get('project_id') %}
+        {% if projnum %}-{{ projnum }}{% endif %}
       </p>
       <p style="margin: 0;"><strong>PO Date:</strong> {{ po.get('updated_at')|format_date }}</p>
       <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision','-') }}</p>
     </div>
+
   </div>
 
   <hr style="margin: 1em 0;">

@@ -9,7 +9,6 @@ from app.supabase_client import (
     fetch_pos_latest_from_po_table
     )
 from app.utils.forms import parse_po_form
-from app.utils.project_filter import get_project_id_by_number
 from app.supabase_client import fetch_all_pos, fetch_active_pos, fetch_project_po_summary, fetch_last_issued_dates_any, fetch_accounts_overview_latest
 from app.utils.status_utils import (
     allowed_next_statuses, 
@@ -91,16 +90,16 @@ def po_list():
     order_by = f"{sort}.{dir_}"
 
     try:
-        project_id = get_project_id_by_number(projectnumber) if projectnumber else None
-        current_app.logger.info(f"🧪 project ID lookup result: {project_id}")
+        project_id = projectnumber or None
 
         pos = fetch_pos_latest_from_po_table(
             project_id=project_id,
             date_from=date_from,
             date_to=date_to,
             statuses=["approved", "issued", "complete"],
-            order_by=order_by,  # ← sorted by PO number or updated_at
+            order_by=order_by,
         )
+
     except Exception as e:
         flash(f"Failed to load POs: {e}", "danger")
         pos = []
@@ -227,7 +226,10 @@ def create_po():
     delivery_addresses = fetch_delivery_addresses()
     delivery_contacts = fetch_delivery_contacts()
 
-    projects_sorted = sorted(projects, key=lambda p: int(p['projectnumber']), reverse=True)
+    def _nat_key(s: str):
+        import re
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s or "")]
+    projects_sorted = sorted(projects, key=lambda p: _nat_key(p.get('projectnumber')))
 
     idempotency_key = str(uuid.uuid4())
     session['last_form_token'] = idempotency_key
@@ -714,7 +716,7 @@ def po_pdf(po_id):
     # Build filename: <ponumber>-<revision>.pdf
     po_number = str(po.get("po_number") or "UNKNOWN")
     revision = str(po.get("current_revision") or "NA")
-    filename = f"{int(po_number):06d}-{revision}.pdf"
+    filename = f"{int(str(po_number)):06d}-{revision}.pdf"
 
     # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
     archive_path = save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)

@@ -3,7 +3,7 @@ from app.supabase_client import get_headers
 from flask import current_app
 
 def get_project_id_by_number(projectnumber):
-    url = f"{current_app.config['SUPABASE_URL']}/rest/v1/projects"
+    url = f"{current_app.config['SUPABASE_URL']}/rest/v1/projects_register"
     params = {
         "projectnumber": f"eq.{projectnumber}",
         "select": "id"

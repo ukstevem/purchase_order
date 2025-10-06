@@ -50,6 +50,38 @@ def get_headers(include_content_type=True):
 # Helpers
 # ------------------------------
 
+def _resolve_projectnumber(base: str, headers: dict, proj: str | None) -> str | None:
+    """
+    If 'proj' looks like a legacy UUID, resolve its projectnumber from old 'projects'.
+    Otherwise return 'proj' unchanged. Safe to call even if 'projects' will be retired soon.
+    """
+    if not proj:
+        return None
+    if not _is_uuid(proj):
+        return proj  # already a projectnumber
+    r = requests.get(
+        f"{base}/rest/v1/projects",
+        headers=headers,
+        params={"select": "projectnumber", "id": f"eq.{proj}", "limit": 1},
+        timeout=10,
+    )
+    r.raise_for_status()
+    rows = r.json() or []
+    return rows[0]["projectnumber"] if rows else None
+
+def fetch_project_item_options():
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/vw_project_item_options"
+    r = requests.get(
+        url,
+        headers=get_headers(False),
+        params={"select": "projectnumber,item_seq,line_desc,option_code,option_label",
+                "order": "projectnumber.asc,item_seq.asc"},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return r.json() or []
+
 def _clean(x):
     x = (x or "").strip() if isinstance(x, str) else x
     return x or None
@@ -78,11 +110,24 @@ def fetch_suppliers():
     return r.json()
 
 def fetch_projects():
+    """
+    Read-only list of projects from project_register.
+    Returns: [{ "projectnumber": "...", "client_id": "...", "created": "...", "modified": "..." }, ...]
+    """
     base, _ = _get_supabase_auth()
-    url = f"{base}/rest/v1/projects"
-    r = requests.get(url, headers=get_headers(False), params={"select": "*"}, timeout=30)
+    url = f"{base}/rest/v1/project_register"
+    r = requests.get(
+        url,
+        headers=get_headers(False),
+        params={
+            "select": "projectnumber,projectdescription,client_id,created,modified",
+            "order": "projectnumber.asc",
+        },
+        timeout=30,
+    )
     r.raise_for_status()
     return r.json()
+
 
 def fetch_delivery_addresses():
     base, _ = _get_supabase_auth()
@@ -148,21 +193,43 @@ def fetch_last_issued_dates(po_numbers: list[str], first_month_start_iso: str, n
             latest_issued[pn] = row.get("updated_at")  # ISO timestamp
     return latest_issued
 
+# def fetch_projects_map():
+#     """
+#     Returns { project_id(uuid): {"projectnumber": str, "projectdescription": str} }
+#     """
+#     base, _ = _get_supabase_auth()
+#     url = f"{base}/rest/v1/projects"
+#     params = {
+#         "select": "id,projectnumber,projectdescription",
+#         "order": "projectnumber.asc",
+#         "limit": 10000,
+#     }
+#     resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+#     resp.raise_for_status()
+#     rows = resp.json() or []
+#     return {r["id"]: {"projectnumber": r["projectnumber"], "projectdescription": r["projectdescription"]} for r in rows}
+
 def fetch_projects_map():
     """
-    Returns { project_id(uuid): {"projectnumber": str, "projectdescription": str} }
+    Returns { projectnumber (str): {"projectnumber": str, "projectdescription": str} }
     """
     base, _ = _get_supabase_auth()
-    url = f"{base}/rest/v1/projects"
+    url = f"{base}/rest/v1/project_register"
     params = {
-        "select": "id,projectnumber,projectdescription",
+        "select": "projectnumber,projectdescription",
         "order": "projectnumber.asc",
         "limit": 10000,
     }
     resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
     resp.raise_for_status()
     rows = resp.json() or []
-    return {r["id"]: {"projectnumber": r["projectnumber"], "projectdescription": r["projectdescription"]} for r in rows}
+    return {
+        r["projectnumber"]: {
+            "projectnumber": r["projectnumber"],
+            "projectdescription": r.get("projectdescription", "")
+        }
+        for r in rows
+    }
 
 
 def fetch_purchase_orders_since(first_month_start_iso: str, next_month_start_iso: str):
@@ -191,35 +258,28 @@ def fetch_purchase_orders_since(first_month_start_iso: str, next_month_start_iso
 
 def fetch_pos_from_po_table(project_id=None, date_from=None, date_to=None,
                             statuses=None, order_by="updated_at.desc"):
-    """
-    Query purchase_orders directly and embed related fields.
-    - project_id: UUID from projects.id
-    - date_from/date_to: 'YYYY-MM-DD' (half-open [from,to))
-    - statuses: list like ["approved","issued","complete"]
-    - order_by: PostgREST order param
-    """
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/purchase_orders"
 
     params = {
-        "select": "id,po_number,reference,status,current_revision,project_id,updated_at,"
-                  "projects(projectnumber),suppliers(name)"
+        # embed suppliers only; derive projectnumber from project_id directly
+        "select": "id,po_number,reference,status,current_revision,project_id,updated_at,suppliers(name)"
     }
     if order_by:
         params["order"] = order_by
 
-    # Build and=(...) so we avoid duplicate param keys
     parts = []
     if project_id:
-        parts.append(f"project_id.eq.{project_id}")
+        headers = get_headers(False)
+        pn = _resolve_projectnumber(base, headers, str(project_id))
+        if pn:
+            parts.append(f"project_id.eq.{pn}")
     if date_from:
-        # add 'Z' if updated_at is timestamptz in your schema
         parts.append(f"updated_at.gte.{date_from}T00:00:00")
     if date_to:
         parts.append(f"updated_at.lt.{date_to}T00:00:00")
     if statuses:
         parts.append(f"status.in.({','.join(statuses)})")
-
     if parts:
         params["and"] = f"({','.join(parts)})"
 
@@ -227,12 +287,10 @@ def fetch_pos_from_po_table(project_id=None, date_from=None, date_to=None,
     resp.raise_for_status()
     rows = resp.json() or []
 
-    # Flatten embeds so templates can use projectnumber / supplier_name directly
     for r in rows:
-        proj = r.pop("projects", None)
+        # expose projectnumber + supplier_name for templates expecting them
+        r["projectnumber"] = r.get("project_id")
         supp = r.pop("suppliers", None)
-        if isinstance(proj, dict):
-            r["projectnumber"] = proj.get("projectnumber")
         if isinstance(supp, dict):
             r["supplier_name"] = supp.get("name")
     return rows
@@ -294,42 +352,31 @@ def fetch_po_updated_at_for_ids_in_window(ids: list[str], first_month_start_iso:
 
 def fetch_pos_latest_from_po_table(project_id=None, date_from=None, date_to=None,
                                    statuses=None, order_by="updated_at.desc"):
-    """
-    Query purchase_orders (base) and inner-join to po_metadata(active=true)
-    so we only return the 'latest' version for each PO.
-
-    Filters:
-      - project_id: UUID (projects.id)
-      - date_from/date_to: 'YYYY-MM-DD' (half-open [from, to))
-      - statuses: list like ["approved","issued","complete"]
-    """
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/purchase_orders"
 
-    # Embed projectnumber & supplier name; inner-join to po_metadata to enforce active=true
     params = {
         "select": (
             "id,po_number,reference,status,current_revision,project_id,updated_at,"
-            "projects(projectnumber),suppliers(name),"
-            "po_metadata!inner(id)"  # inner join, we don't need fields—id is enough
+            "suppliers(name),po_metadata!inner(id)"
         ),
-        # ensure only rows where the joined po_metadata row is active
         "po_metadata.active": "is.true",
     }
     if order_by:
         params["order"] = order_by
 
-    # Build AND clause for top-level filters
     parts = []
     if project_id:
-        parts.append(f"project_id.eq.{project_id}")
+        headers = get_headers(False)
+        pn = _resolve_projectnumber(base, headers, str(project_id))
+        if pn:
+            parts.append(f"project_id.eq.{pn}")
     if date_from:
-        parts.append(f"updated_at.gte.{date_from}T00:00:00")  # add 'Z' if timestamptz
+        parts.append(f"updated_at.gte.{date_from}T00:00:00")
     if date_to:
         parts.append(f"updated_at.lt.{date_to}T00:00:00")
     if statuses:
         parts.append(f"status.in.({','.join(statuses)})")
-
     if parts:
         params["and"] = f"({','.join(parts)})"
 
@@ -337,16 +384,12 @@ def fetch_pos_latest_from_po_table(project_id=None, date_from=None, date_to=None
     resp.raise_for_status()
     rows = resp.json() or []
 
-    # Flatten embeds for template convenience
     for r in rows:
-        proj = r.pop("projects", None)
+        r["projectnumber"] = r.get("project_id")
         supp = r.pop("suppliers", None)
-        if isinstance(proj, dict):
-            r["projectnumber"] = proj.get("projectnumber")
         if isinstance(supp, dict):
             r["supplier_name"] = supp.get("name")
     return rows
-
 
 # ------------------------------
 # Delivery Contacts
@@ -503,21 +546,35 @@ def insert_line_items(items):
 def fetch_all_pos(project_id=None):
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/purchase_orders"
+
     params = {
-        "select": "id,po_number,reference,status,current_revision,created_at,project_id,projects(projectnumber),suppliers(name)",
-        "active": "eq.true"
+        # no project_register embed here (avoid 300 ambiguity)
+        "select": "id,po_number,reference,status,current_revision,created_at,project_id,suppliers(name)",
+        "active": "eq.true",
+        "order": "po_number.asc",
     }
     if project_id:
-        params["project_id"] = f"eq.{project_id}"
+        # accept either legacy UUID or projectnumber
+        headers = get_headers(False)
+        pn = _resolve_projectnumber(base, headers, str(project_id))
+        if pn:
+            params["project_id"] = f"eq.{pn}"
 
     resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    rows = resp.json() or []
+
+    # flatten: expose 'projectnumber' and 'supplier_name' like before
+    for r in rows:
+        r["projectnumber"] = r.get("project_id")
+        supp = r.pop("suppliers", None)
+        if isinstance(supp, dict):
+            r["supplier_name"] = supp.get("name")
+    return rows
+
 
 
 def fetch_active_pos(project_id=None, date_from=None, date_to=None, order_by="updated_at.desc"):
-    import requests
-
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/active_po_list"
 
@@ -525,10 +582,12 @@ def fetch_active_pos(project_id=None, date_from=None, date_to=None, order_by="up
     if order_by:
         params["order"] = order_by
 
-    # Build AND clause in PostgREST format: and=(col.op.val,col.op.val,...)
     parts = []
     if project_id:
-        parts.append(f"project_id.eq.{project_id}")
+        headers = get_headers(False)
+        pn = _resolve_projectnumber(base, headers, str(project_id))
+        if pn:
+            parts.append(f"projectnumber.eq.{pn}")  # view typically has 'projectnumber'
     if date_from:
         parts.append(f"updated_at.gte.{date_from}T00:00:00")
     if date_to:
@@ -541,17 +600,16 @@ def fetch_active_pos(project_id=None, date_from=None, date_to=None, order_by="up
     resp.raise_for_status()
     return resp.json()
 
-
 def fetch_po_detail(po_id):
     print(f"🔍 Fetching PO {po_id}")
     base, _ = _get_supabase_auth()
     headers = get_headers(False)
 
-    # Step 1: main PO + metadata
+    # Step 1: PO + metadata + supplier (no project_register embed)
     po_url = f"{base}/rest/v1/purchase_orders"
     po_params = {
         "id": f"eq.{po_id}",
-        "select": "*,projects(*),suppliers(*),po_metadata(*)",
+        "select": "*,suppliers(*),po_metadata(*)",
         "po_metadata.active": "is.true"
     }
     po_resp = requests.get(po_url, headers=headers, params=po_params, timeout=30)
@@ -562,6 +620,18 @@ def fetch_po_detail(po_id):
     except Exception as e:
         print(f"❌ JSON error: {e}")
         return None
+
+    # Derive 'projectnumber' from project_id
+    po["projectnumber"] = po.get("project_id")
+
+    # Step 1b: (Optional) fetch project_register row if you need extra fields (e.g., client_id)
+    if po.get("projectnumber"):
+        pr_url = f"{base}/rest/v1/project_register"
+        pr_params = {"projectnumber": f"eq.{po['projectnumber']}", "select": "*", "limit": "1"}
+        pr_resp = requests.get(pr_url, headers=headers, params=pr_params, timeout=15)
+        if pr_resp.ok:
+            pr_rows = pr_resp.json() or []
+            po["project_register"] = pr_rows[0] if pr_rows else None
 
     # Step 2: line items
     li_url = f"{base}/rest/v1/po_line_items"
@@ -594,7 +664,6 @@ def fetch_po_detail(po_id):
             po["delivery_address"] = da_results[0] if da_results else None
 
     return po
-
 
 def deactivate_po_data(po_id):
     base, _ = _get_supabase_auth()

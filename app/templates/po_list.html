@@ -28,23 +28,34 @@
       </tr>
     </thead>
     <tbody>
-      {% for po in pos %}
-      <tr>
-        <td>{{ "%06d"|format(po["po_number"]) }}</td>
-        <td>{{ po.projectnumber }}</td>
-        <td>{{ po.supplier_name }}</td>
-        <td>
-          <span class="status-tag status-{{ po.status }}">
-            {{ po.status | capitalize }}
-          </span>
-        </td>
-        <td>{{ po.current_revision }}</td>
-        <td>
-           {% set po_id = po.id or po.purchase_order_id %}
-          <a class="btn btn-small" href="/po/{{ po_id }}">View PO</a>
-        </td>
-      </tr>
-      {% endfor %}
+      {% if not pos %}
+        <tr><td colspan="6" style="text-align:center; color:#888;">No purchase orders match your filter.</td></tr>
+      {% else %}
+        {% for po in pos %}
+          {% set po_id = po.id or po.purchase_order_id %}
+          {% set pn = po.po_number %}
+          <tr>
+            <td>
+              {# Safely zero-pad if numeric, else show raw #}
+              {% if pn is not none and pn|string|trim != '' and (pn|string).isdigit() %}
+                {{ ("%06d"|format(pn|int)) }}
+              {% else %}
+                {{ pn or "" }}
+              {% endif %}
+            </td>
+            <td>{{ po.projectnumber or po.project_id or "" }}</td>
+            <td>{{ po.supplier_name or "" }}</td>
+            <td>
+              {% set st = (po.status or "")|lower %}
+              <span class="status-tag status-{{ st }}">{{ st|capitalize }}</span>
+            </td>
+            <td>{{ po.current_revision or "" }}</td>
+            <td>
+              <a class="btn btn-small" href="{{ url_for('main.po_preview', po_id=po_id) }}">View PO</a>
+            </td>
+          </tr>
+        {% endfor %}
+      {% endif %}
     </tbody>
   </table>
 {% endblock %}
