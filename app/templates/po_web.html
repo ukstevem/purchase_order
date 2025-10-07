@@ -29,16 +29,14 @@
     <h2 style="margin: 0;">Purchase Order</h2>
     <p style="margin: 0;">
       <strong>PO Number:</strong>
-      {# zero-pad if numeric, else show as-is #}
       {% set pn = po.get('po_number') %}
-      {% if pn is not none and (pn|string).isdigit() %}
-        {{ "%06d"|format(pn|int) }}
-      {% else %}
-        {{ pn or "" }}
-      {% endif %}
-      {# append -<projectnumber> #}
       {% set projnum = po.get('projectnumber') or po.get('project_id') %}
-      {% if projnum %}-{{ projnum }}{% endif %}
+      {% if pn is not none and (pn|string).isdigit() -%}
+        {{ "%06d"|format(pn|int) -}}
+      {%- else -%}
+        {{ pn or "" -}}
+      {%- endif -%}
+      {%- if projnum %}-{{ projnum }}{% endif %}
     </p>
     <p style="margin: 0;"><strong>PO Date:</strong> {{ po.get('updated_at')|format_date }}</p>
     <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision', '-') }}</p>

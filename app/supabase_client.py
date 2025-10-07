@@ -109,24 +109,21 @@ def fetch_suppliers():
     r.raise_for_status()
     return r.json()
 
+# DEPRECATED: keep name but implement via fetch_projects_map for backward compatibility
 def fetch_projects():
     """
-    Read-only list of projects from project_register.
-    Returns: [{ "projectnumber": "...", "client_id": "...", "created": "...", "modified": "..." }, ...]
+    Deprecated shim.
+    Historically returned a LIST of dicts. We now build that list from fetch_projects_map()
+    so existing callers/templates keep working without changes.
+
+    Returns: [{"projectnumber": str, "projectdescription": str}, ...] sorted by projectnumber.
     """
-    base, _ = _get_supabase_auth()
-    url = f"{base}/rest/v1/project_register"
-    r = requests.get(
-        url,
-        headers=get_headers(False),
-        params={
-            "select": "projectnumber,projectdescription,client_id,created,modified",
-            "order": "projectnumber.asc",
-        },
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()
+    proj_map = fetch_projects_map()
+    # Build a sorted list to preserve the old ordering by projectnumber
+    return [
+        {"projectnumber": pn, "projectdescription": data.get("projectdescription", "")}
+        for pn, data in sorted(proj_map.items(), key=lambda kv: kv[0])
+    ]
 
 
 def fetch_delivery_addresses():
@@ -212,24 +209,46 @@ def fetch_last_issued_dates(po_numbers: list[str], first_month_start_iso: str, n
 def fetch_projects_map():
     """
     Returns { projectnumber (str): {"projectnumber": str, "projectdescription": str} }
+    Uses projects_register (new) with fallbacks for older envs.
     """
     base, _ = _get_supabase_auth()
-    url = f"{base}/rest/v1/project_register"
-    params = {
-        "select": "projectnumber,projectdescription",
-        "order": "projectnumber.asc",
-        "limit": 10000,
-    }
-    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
-    resp.raise_for_status()
-    rows = resp.json() or []
-    return {
-        r["projectnumber"]: {
-            "projectnumber": r["projectnumber"],
-            "projectdescription": r.get("projectdescription", "")
+    headers = get_headers(False)
+
+    selects = "projectnumber,projectdescription"
+    tries = [
+        "projects_register",   # new, plural
+        "project_register",    # old, singular
+        "projects",            # oldest
+    ]
+
+    last_err = None
+    for rel in tries:
+        url = f"{base}/rest/v1/{rel}"
+        params = {
+            "select": selects,
+            "order": "projectnumber.asc",
+            "limit": 10000,
         }
-        for r in rows
-    }
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            if resp.status_code != 200:
+                logging.warning("fetch_projects_map: %s failed (%s): %s", rel, resp.status_code, resp.text)
+                resp.raise_for_status()
+            rows = resp.json() or []
+            return {
+                r["projectnumber"]: {
+                    "projectnumber": r["projectnumber"],
+                    "projectdescription": r.get("projectdescription", "")
+                }
+                for r in rows
+            }
+        except requests.HTTPError as e:
+            last_err = e
+            continue
+
+    # If we got here, all attempts failed
+    raise RuntimeError(f"Unable to load projects from any known relation. Last error: {last_err}")
+
 
 
 def fetch_purchase_orders_since(first_month_start_iso: str, next_month_start_iso: str):

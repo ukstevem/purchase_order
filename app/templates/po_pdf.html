@@ -46,10 +46,14 @@ Printed: {{ now.strftime('%d %b %Y') }}
       <h2 style="margin: 0;">Purchase Order</h2>
       <p style="margin: 0;">
         <strong>PO Number:</strong>
-        {{ "%06d"|format(po.get('po_number', 0)) }}
-        {# append -<projectnumber> if present #}
+        {% set pn = po.get('po_number') %}
         {% set projnum = po.get('projectnumber') or po.get('project_id') %}
-        {% if projnum %}-{{ projnum }}{% endif %}
+        {% if pn is not none and (pn|string).isdigit() -%}
+          {{ "%06d"|format(pn|int) -}}
+        {%- else -%}
+          {{ pn or "" -}}
+        {%- endif -%}
+        {%- if projnum %}-{{ projnum }}{% endif %}
       </p>
       <p style="margin: 0;"><strong>PO Date:</strong> {{ po.get('updated_at')|format_date }}</p>
       <p style="margin: 0;"><strong>Revision:</strong> {{ po.get('current_revision','-') }}</p>

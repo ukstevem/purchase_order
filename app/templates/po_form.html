@@ -5,7 +5,8 @@
 {% endblock %}
 
 {% block content %}
-<h2>{{ 'Create Purchase Order' if mode == 'create' else 'Edit Purchase Order'  }}
+<h2>
+  {{ 'Create Purchase Order' if mode == 'create' else 'Edit Purchase Order'  }}
   {% if mode == 'edit' and po_data.po_number %}
     <span class="text-muted">{{ "%06d"|format(po_data.po_number) }}</span>
   {% endif %}
@@ -13,175 +14,167 @@
 
 <form method="POST" action="{{ form_action }}" id="po-form">
   <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
-  
-  <!-- Project -->
-  <!-- <label for="project_id">Project</label>
-  <select id="project_id" name="project_id" required>
-    {% for project in projects %}
-      {# value is the projectnumber; selected compares to po_data.project_id (also a projectnumber) #}
-      <option value="{{ project.projectnumber }}"
-        {% if po_data.get('project_id') == project.projectnumber %}selected{% endif %}>
-        {{ project.projectnumber }}{% if project.projectdescription %} - {{ project.projectdescription }}{% endif %}
-      </option>
-    {% endfor %}
-  </select> -->
+
+  {# --- Project / Item (single dropdown) --- #}
   <label for="project_combo">Project / Item</label>
   <select id="project_combo" name="project_combo" required>
     <option value="">-- Select Project / Item --</option>
     {% for o in project_items %}
-      <option value="{{ o.projectnumber }}:{{ o.item_seq }}">
+      {% set is_selected = (
+        (po_data.get('project_id')|string|trim) == (o.projectnumber|string|trim) and
+        ((po_data.get('item_seq') if po_data.get('item_seq') is not none else '')|string)
+          == ((o.item_seq if o.item_seq is not none else '')|string)
+        ) %}
+      <option
+        value="{{ o.projectnumber }}:{{ o.item_seq }}"
+        {% if is_selected %}selected{% endif %}
+      >
         {{ o.option_label }}
       </option>
     {% endfor %}
   </select>
 
+  {# Mirror fields (so backend can accept either project_combo or separate fields) #}
+  <input type="hidden" id="project_id" name="project_id" value="{{ po_data.get('project_id','') }}">
+  <input type="hidden" id="item_seq"   name="item_seq"   value="{{ po_data.get('item_seq','') }}">
 
-  <!-- Supplier -->
+  {# --- Supplier --- #}
   <label for="supplier_id">Supplier</label>
-  <select name="supplier_id" required>
+  <select id="supplier_id" name="supplier_id" required>
     {% for supplier in suppliers %}
       <option value="{{ supplier.id }}"
-        {% if po_data.get('supplier_id') == supplier.id %} selected {% endif %}>
+        {% if po_data.get('supplier_id') == supplier.id %}selected{% endif %}>
         {{ supplier.name }}
       </option>
     {% endfor %}
   </select>
 
-    <div class="form-group">
-    <!-- Delivery Address (Controlled List Only) -->
+  {# --- Delivery (address + contact) --- #}
+  <div class="form-group">
     <label for="delivery_address_id">Deliver To</label>
     <select name="delivery_address_id" id="delivery_address_id" onchange="filterContacts()">
-        <option value="">-- Select Address --</option>
-        {% for address in delivery_addresses %}
-            <option value="{{ address.id }}" 
-                    {% if po_data.get('delivery_address_id') == address.id %}selected{% endif %}>
-                {{ address.name }}
-            </option>
-        {% endfor %}
+      <option value="">-- Select Address --</option>
+      {% for address in delivery_addresses %}
+        <option value="{{ address.id }}"
+                {% if po_data.get('delivery_address_id') == address.id %}selected{% endif %}>
+          {{ address.name }}
+        </option>
+      {% endfor %}
     </select>
 
-    <!-- Delivery Contact (with Manual Option) -->
     <label for="delivery_contact_id">Delivery Contact</label>
     <select name="delivery_contact_id" id="delivery_contact_id" onchange="toggleManualContact()">
-        <option value="">-- Select Contact --</option>
-        {% for contact in delivery_contacts %}
-            <option value="{{ contact.id }}" 
-                    data-address-id="{{ contact.address_id }}"
-                    {% if po_data.get('delivery_contact_id') == contact.id %}selected{% endif %}>
-                {{ contact.name }}
-            </option>
-        {% endfor %}
-        <option value="manual">⌨️ Enter Manual Contact</option>
+      <option value="">-- Select Contact --</option>
+      {% for contact in delivery_contacts %}
+        <option value="{{ contact.id }}"
+                data-address-id="{{ contact.address_id }}"
+                {% if po_data.get('delivery_contact_id') == contact.id %}selected{% endif %}>
+          {{ contact.name }}
+        </option>
+      {% endfor %}
+      <option value="manual">⌨️ Enter Manual Contact</option>
     </select>
 
-    <!-- Manual Contact Inputs (hidden by default) -->
-    <div id="manual_contact_container" style="display: none; margin-top: 10px;">
+    <div id="manual_contact_container" style="display:none; margin-top:10px;">
       <div class="form-row">
         <div class="form-col">
           <label for="manual_contact_name">Contact Name</label>
           <input type="text" name="manual_contact_name" id="manual_contact_name"
-                placeholder="Contact name..."
-                value="{{ po_data.get('manual_contact_name', '') }}">
+                 placeholder="Contact name..."
+                 value="{{ po_data.get('manual_contact_name', '') }}">
         </div>
         <div class="form-col">
           <label for="manual_contact_phone">Phone</label>
           <input type="tel" name="manual_contact_phone" id="manual_contact_phone"
-                placeholder="Phone number..."
-                value="{{ po_data.get('manual_contact_phone', '') }}">
+                 placeholder="Phone number..."
+                 value="{{ po_data.get('manual_contact_phone', '') }}">
         </div>
         <div class="form-col">
           <label for="manual_contact_email">Email</label>
           <input type="email" name="manual_contact_email" id="manual_contact_email"
-                placeholder="Email address..."
-                value="{{ po_data.get('manual_contact_email', '') }}">
+                 placeholder="Email address..."
+                 value="{{ po_data.get('manual_contact_email', '') }}">
         </div>
       </div>
     </div>
 
-    <!-- Delivery Date + Terms + Test Certificates in one row -->
-  <div class="form-row">
+    <div class="form-row">
+      <div class="form-col narrow">
+        <label for="supplier_reference_number">Supplier Ref / Quote</label>
+        <input type="text" name="supplier_reference_number" id="supplier_reference_number"
+               placeholder="e.g. Q-12345"
+               value="{{ po_data.get('supplier_reference_number', '') }}">
+      </div>
 
-    <div class="form-col narrow">
-      <label for="supplier_reference_number">Supplier Ref / Quote</label>
-      <input type="text" name="supplier_reference_number" id="supplier_reference_number"
-            placeholder="e.g. Q-12345"
-            value="{{ po_data.get('supplier_reference_number', '') }}">
-    </div>
+      <div class="form-col narrow">
+        <label for="delivery_date">Delivery Date</label>
+        <input type="date" name="delivery_date" id="delivery_date" required
+               value="{{ po_data.get('delivery_date', '') }}">
+      </div>
 
-    <div class="form-col narrow">
-      <label for="delivery_date">Delivery Date</label>
-      <input type="date" name="delivery_date" id="delivery_date"
-            required value="{{ po_data.get('delivery_date', '') }}">
-    </div>
+      <div class="form-col">
+        <label for="delivery_terms">Delivery Terms</label>
+        <select id="delivery_terms" name="delivery_terms" required>
+          <option value="">-- Select Incoterm --</option>
+          <option value="EXW" {% if po_data.get('delivery_terms') == 'EXW' %}selected{% endif %}>EXW — Ex Works</option>
+          <option value="FCA" {% if po_data.get('delivery_terms') == 'FCA' %}selected{% endif %}>FCA — Free Carrier</option>
+          <option value="CPT" {% if po_data.get('delivery_terms') == 'CPT' %}selected{% endif %}>CPT — Carriage Paid To</option>
+          <option value="CIP" {% if po_data.get('delivery_terms') == 'CIP' %}selected{% endif %}>CIP — Carriage and Insurance Paid To</option>
+          <option value="DAP" {% if po_data.get('delivery_terms') == 'DAP' %}selected{% endif %}>DAP — Delivered At Place</option>
+          <option value="DPU" {% if po_data.get('delivery_terms') == 'DPU' %}selected{% endif %}>DPU — Delivered at Place Unloaded</option>
+          <option value="DDP" {% if po_data.get('delivery_terms') == 'DDP' %}selected{% endif %}>DDP — Delivered Duty Paid</option>
+          <option value="FAS" {% if po_data.get('delivery_terms') == 'FAS' %}selected{% endif %}>FAS — Free Alongside Ship</option>
+          <option value="FOB" {% if po_data.get('delivery_terms') == 'FOB' %}selected{% endif %}>FOB — Free On Board</option>
+          <option value="CFR" {% if po_data.get('delivery_terms') == 'CFR' %}selected{% endif %}>CFR — Cost and Freight</option>
+          <option value="CIF" {% if po_data.get('delivery_terms') == 'CIF' %}selected{% endif %}>CIF — Cost, Insurance & Freight</option>
+          <option value="Not Applicable" {% if po_data.get('delivery_terms') == 'N-A' %}selected{% endif %}>Not Applicable</option>
+        </select>
+      </div>
 
-    <div class="form-col">
-      <label for="delivery_terms">Delivery Terms</label>
-      <select id="delivery_terms" name="delivery_terms" required>
-        <option value="">-- Select Incoterm --</option>
-        <option value="EXW" {% if po_data.get('delivery_terms') == 'EXW' %}selected{% endif %}>EXW — Ex Works</option>
-        <option value="FCA" {% if po_data.get('delivery_terms') == 'FCA' %}selected{% endif %}>FCA — Free Carrier</option>
-        <option value="CPT" {% if po_data.get('delivery_terms') == 'CPT' %}selected{% endif %}>CPT — Carriage Paid To</option>
-        <option value="CIP" {% if po_data.get('delivery_terms') == 'CIP' %}selected{% endif %}>CIP — Carriage and Insurance Paid To</option>
-        <option value="DAP" {% if po_data.get('delivery_terms') == 'DAP' %}selected{% endif %}>DAP — Delivered At Place</option>
-        <option value="DPU" {% if po_data.get('delivery_terms') == 'DPU' %}selected{% endif %}>DPU — Delivered at Place Unloaded</option>
-        <option value="DDP" {% if po_data.get('delivery_terms') == 'DDP' %}selected{% endif %}>DDP — Delivered Duty Paid</option>
-        <option value="FAS" {% if po_data.get('delivery_terms') == 'FAS' %}selected{% endif %}>FAS — Free Alongside Ship</option>
-        <option value="FOB" {% if po_data.get('delivery_terms') == 'FOB' %}selected{% endif %}>FOB — Free On Board</option>
-        <option value="CFR" {% if po_data.get('delivery_terms') == 'CFR' %}selected{% endif %}>CFR — Cost and Freight</option>
-        <option value="CIF" {% if po_data.get('delivery_terms') == 'CIF' %}selected{% endif %}>CIF — Cost, Insurance & Freight</option>
-        <option value="Not Applicable" {% if po_data.get('delivery_terms') == 'N-A' %}selected{% endif %}>Not Applicable</option>
-      </select>
-    </div>
-
-    <div class="form-col narrow">
-      <label for="test_cert_required">Test Certificates Required</label>
-      <select name="test_cert_required" id="test_cert_required">
-        <option value="0" {% if not po_data.get('test_cert_required') %}selected{% endif %}>No</option>
-        <option value="1" {% if po_data.get('test_cert_required') %}selected{% endif %}>Yes</option>
-      </select>
+      <div class="form-col narrow">
+        <label for="test_cert_required">Test Certificates Required</label>
+        <select name="test_cert_required" id="test_cert_required">
+          <option value="0" {% if not po_data.get('test_cert_required') %}selected{% endif %}>No</option>
+          <option value="1" {% if po_data.get('test_cert_required') %}selected{% endif %}>Yes</option>
+        </select>
+      </div>
     </div>
   </div>
 
-
   <hr>
 
+  {# --- Line Items --- #}
   <h3>Line Items</h3>
-
   <table class="line-items">
     <thead>
       <tr>
         <th>Description</th>
-        <th style="width: 80px;">Qty</th>
-        <th style="width: 80px;">Unit</th>
-        <th style="width: 120px;">Unit Price</th>
-        <th style="width: 130px;">Line Total</th>
-        <th style="width: 80px;"></th>
+        <th style="width:80px;">Qty</th>
+        <th style="width:80px;">Unit</th>
+        <th style="width:120px;">Unit Price</th>
+        <th style="width:130px;">Line Total</th>
+        <th style="width:80px;"></th>
       </tr>
     </thead>
     <tbody id="line-items-container">
       {% for item in po_data.get('line_items', [{}]) %}
         <tr>
           <td>
-              <textarea name="description[]" 
-                placeholder="Description" 
-                required 
-                rows="1">{{ item.get('description', '') }}</textarea>
+            <textarea name="description[]" placeholder="Description" required rows="1">{{ item.get('description','') }}</textarea>
           </td>
-          <td><input type="number" name="quantity[]" value="{{ item.get('quantity', '') }}" placeholder="Qty" min="0" step="0.01" required oninput="updateTotal()"></td>
-          <td><input type="text" name="unit[]" value="{{ item.get('unit', '') }}" placeholder="Unit" required></td>
+          <td><input type="number" name="quantity[]" value="{{ item.get('quantity','') }}" placeholder="Qty" min="0" step="0.01" required oninput="updateTotal()"></td>
+          <td><input type="text" name="unit[]" value="{{ item.get('unit','') }}" placeholder="Unit" required></td>
           <td>
             <div class="money-input-wrap">
               <input type="text" name="unit_price[]"
-                    value="{{ '{:,.2f}'.format(item.get('unit_price', 0)) if item.get('unit_price') else '' }}"
-                    placeholder="Unit Price"
-                    class="money-input"
-                    oninput="formatMoneyInput(this); updateTotal()">
+                     value="{{ '{:,.2f}'.format(item.get('unit_price', 0)) if item.get('unit_price') else '' }}"
+                     placeholder="Unit Price"
+                     class="money-input"
+                     oninput="formatMoneyInput(this); updateTotal()">
             </div>
           </td>
           <td class="money"><span class="currency">£</span><span class="row-total">0.00</span></td>
-          <td class="actions">
-            <button type="button" class="btn" onclick="removeLineItem(this)">Remove</button>
-          </td>
+          <td class="actions"><button type="button" class="btn" onclick="removeLineItem(this)">Remove</button></td>
         </tr>
       {% endfor %}
     </tbody>
@@ -195,67 +188,81 @@
   </table>
 
   <br>
-
   <button type="button" class="btn" onclick="addLineItem()">+ Add Line Item</button>
 
-<!-- Actions row -->
-<div class="actions-bar">
-  {% if mode == 'edit' and po_data.po_number %}
-    <label for="status" class="actions-label">PO Status</label>
-    <div class="actions-control">
-      <select name="status" id="status">
-        {% for s in statuses %}
-          <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>{{ s.title() }}</option>
-        {% endfor %}
-      </select>
-    </div>
-  {% endif %}
+  {# --- Actions row --- #}
+  <div class="actions-bar">
+    {% if mode == 'edit' and po_data.po_number %}
+      <label for="status" class="actions-label">PO Status</label>
+      <div class="actions-control">
+        <select name="status" id="status">
+          {% for s in statuses %}
+            <option value="{{ s }}" {% if s == po_data.status %}selected{% endif %}>{{ s.title() }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
 
-  {% set st = (po_data.status or 'draft')|lower %}
-  {% if st in ['approved', 'issued'] %}
-    <label for="bump_revision" class="actions-label">Bump Revision</label>
-    <div class="actions-control">
-      <select name="bump_revision" id="bump_revision">
-        <option value="0" selected>No</option>
-        <option value="1">Yes</option>
-      </select>
-    </div>
-  {% endif %}
+    {% set st = (po_data.status or 'draft')|lower %}
+    {% if st in ['approved', 'issued'] %}
+      <label for="bump_revision" class="actions-label">Bump Revision</label>
+      <div class="actions-control">
+        <select name="bump_revision" id="bump_revision">
+          <option value="0" selected>No</option>
+          <option value="1">Yes</option>
+        </select>
+      </div>
+    {% endif %}
 
-  <!-- Empty label cell keeps the grid aligned -->
-  <span class="actions-label" aria-hidden="true"></span>
-  <div class="actions-submit">
-    <button type="submit" class="btn btn-compact" id="save-btn">
-      {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
-    </button>
+    <span class="actions-label" aria-hidden="true"></span>
+    <div class="actions-submit">
+      <button type="submit" class="btn btn-compact" id="save-btn">
+        {{ 'Create PO' if mode == 'create' else 'Save Changes' }}
+      </button>
+    </div>
   </div>
-</div>
-
-
-
 </form>
 
 <script>
+/* ---------- Project / Item -> mirror hidden fields ---------- */
+(function () {
+  const combo = document.getElementById('project_combo');
+  const hidPn = document.getElementById('project_id');
+  const hidSeq = document.getElementById('item_seq');
+
+  function sync() {
+    const v = combo.value || '';
+    const idx = v.indexOf(':');
+    if (idx > -1) {
+      hidPn.value = v.slice(0, idx);
+      hidSeq.value = v.slice(idx + 1);
+    } else {
+      hidPn.value = '';
+      hidSeq.value = '';
+    }
+  }
+
+  if (combo) {
+    combo.addEventListener('change', sync);
+    // Initialise on load (preselect in edit mode)
+    sync();
+  }
+})();
+
 /* -------------------- Line items (add/remove) -------------------- */
 function addLineItem() {
   const container = document.getElementById('line-items-container');
   const row = document.createElement('tr');
   row.innerHTML = `
-    <td>
-      <textarea name="description[]" placeholder="Description" rows="1" required></textarea>
-    </td>
+    <td><textarea name="description[]" placeholder="Description" rows="1" required></textarea></td>
     <td><input type="number" name="quantity[]" placeholder="Qty" min="0" step="0.01" required oninput="updateTotal()"></td>
     <td><input type="text" name="unit[]" placeholder="Unit" required></td>
-    <td>
-      <div class="money-input-wrap">
-        <input type="text" name="unit_price[]" placeholder="Unit Price" class="money-input">
-      </div>
-    </td>
+    <td><div class="money-input-wrap"><input type="text" name="unit_price[]" placeholder="Unit Price" class="money-input"></div></td>
     <td class="money"><span class="currency">£</span><span class="row-total">0.00</span></td>
     <td class="actions"><button type="button" class="btn" onclick="removeLineItem(this)">Remove</button></td>
   `;
   container.appendChild(row);
-  wireMoneyInputs(row);   // attach money listeners to the new input
+  wireMoneyInputs(row);
   updateTotal();
 }
 
@@ -265,339 +272,178 @@ function removeLineItem(button) {
 }
 
 /* -------------------- Money input formatting (caret-stable) -------------------- */
-/* Add commas to integer part */
-function addCommas(intStr) {
-  return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
-
-/* Sanitize to numeric with ≤2 decimals (no £, no commas) */
-/* Sanitize a string to a numeric representation using the **last** typed decimal.
-   - Strips anything except digits and dots
-   - Keeps only the last dot as the decimal separator
-   - Limits to 2 decimal digits
-   - Trims leading zeros in the integer part (but keeps a single 0)
-*/
-function sanitizeToNumeric(str) {
-  if (!str) return '';
-
-  // Keep digits and dots only
-  const filtered = String(str).replace(/[^0-9.]/g, '');
-
-  // Where is the LAST dot in what the user typed?
-  const lastDot = filtered.lastIndexOf('.');
-
-  // Remove all dots to get pure digits
-  const digitsOnly = filtered.replace(/\./g, '');
-
-  // If no dot at all, it's just an integer; trim leading zeros
-  if (lastDot === -1) {
-    // Trim leading zeros but keep a single 0 if empty
-    const intPart = digitsOnly.replace(/^0+(?=\d)/, '');
+function addCommas(intStr){return intStr.replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+function sanitizeToNumeric(str){
+  if(!str)return '';
+  const filtered=String(str).replace(/[^0-9.]/g,'');
+  const lastDot=filtered.lastIndexOf('.');
+  const digitsOnly=filtered.replace(/\./g,'');
+  if(lastDot===-1){
+    const intPart=digitsOnly.replace(/^0+(?=\d)/,'');
     return intPart;
   }
-
-  // Count how many digits were before that last dot in the original filtered string
-  // (i.e., how many digits to take for the integer part)
-  // We do this by counting digits up to lastDot (inclusive-exclusive).
-  const beforeDotStr = filtered.slice(0, lastDot);
-  const digitsBeforeDot = (beforeDotStr.match(/\d/g) || []).length;
-
-  // Split digitsOnly accordingly
-  let intDigits = digitsOnly.slice(0, digitsBeforeDot);
-  let decDigits = digitsOnly.slice(digitsBeforeDot);
-
-  // Trim integer leading zeros (but keep one 0 if it would become empty)
-  intDigits = intDigits.replace(/^0+(?=\d)/, '');
-  if (intDigits === '') intDigits = '0';
-
-  // Limit decimals to 2 digits
-  decDigits = decDigits.slice(0, 2);
-
-  // If user typed a dot but no decimals yet, keep the trailing dot (e.g., "123.")
-  if (decDigits.length === 0) return intDigits + '.';
-
-  return intDigits + '.' + decDigits;
+  const beforeDotStr=filtered.slice(0,lastDot);
+  const digitsBeforeDot=(beforeDotStr.match(/\d/g)||[]).length;
+  let intDigits=digitsOnly.slice(0,digitsBeforeDot);
+  let decDigits=digitsOnly.slice(digitsBeforeDot);
+  intDigits=intDigits.replace(/^0+(?=\d)/,''); if(intDigits==='') intDigits='0';
+  decDigits=decDigits.slice(0,2);
+  if(decDigits.length===0) return intDigits+'.';
+  return intDigits+'.'+decDigits;
 }
-
-
-/* Format numeric string -> "1,234.56" (string) */
-function formatNumericString(numStr) {
-  if (!numStr) return '';
-  const [intPart, decPartRaw = ''] = numStr.split('.');
-  const intFmt = addCommas(intPart.length ? intPart : '0');
-  if (numStr.endsWith('.') && decPartRaw === '') return intFmt + '.';
-  const decPart = decPartRaw;
-  return decPart ? `${intFmt}.${decPart}` : intFmt;
+function formatNumericString(numStr){
+  if(!numStr)return '';
+  const [intPart,decPartRaw='']=numStr.split('.');
+  const intFmt=addCommas(intPart.length?intPart:'0');
+  if(numStr.endsWith('.')&&decPartRaw==='')return intFmt+'.';
+  const decPart=decPartRaw;
+  return decPart?`${intFmt}.${decPart}`:intFmt;
 }
-
-/* Count digits before caret */
-function countDigitsBefore(str, caret) {
-  let c = 0;
-  for (let i = 0; i < Math.min(caret, str.length); i++) {
-    if (/\d/.test(str[i])) c++;
-  }
-  return c;
-}
-
-/* Find caret index after N digits */
-function caretIndexForDigitCount(str, digits) {
-  if (digits <= 0) return 0;
-  let seen = 0;
-  for (let i = 0; i < str.length; i++) {
-    if (/\d/.test(str[i])) {
-      seen++;
-      if (seen === digits) return i + 1;
+function moneyFormatWithCaret(e){
+  const input=e.target;
+  const prevValue=input.value;
+  const prevCaret=input.selectionStart ?? prevValue.length;
+  const prevDotIdx=prevValue.indexOf('.');
+  const wasAfterDecimal=prevDotIdx!==-1 && prevCaret>prevDotIdx;
+  let digitsAfterDecimal=0;
+  if(wasAfterDecimal){
+    for(let i=prevDotIdx+1;i<Math.min(prevCaret,prevValue.length);i++){
+      if(/\d/.test(prevValue[i])) digitsAfterDecimal++;
     }
   }
-  return str.length;
-}
-
-/* Format with commas while preserving caret position (incl. after-decimal typing) */
-function moneyFormatWithCaret(e) {
-  const input = e.target;
-
-  const prevValue = input.value;
-  const prevCaret = input.selectionStart ?? prevValue.length;
-
-  // Track if caret was after the decimal and how many digits were after it
-  const prevDotIdx = prevValue.indexOf('.');
-  const wasAfterDecimal = prevDotIdx !== -1 && prevCaret > prevDotIdx;
-  let digitsAfterDecimal = 0;
-  if (wasAfterDecimal) {
-    for (let i = prevDotIdx + 1; i < Math.min(prevCaret, prevValue.length); i++) {
-      if (/\d/.test(prevValue[i])) digitsAfterDecimal++;
-    }
-  }
-
-  // Also track how many digits were before the caret (fallback logic)
-  const prevDigitsBefore = (function countDigitsBefore(str, caret) {
-    let c = 0;
-    for (let i = 0; i < Math.min(caret, str.length); i++) {
-      if (/\d/.test(str[i])) c++;
-    }
-    return c;
-  })(prevValue, prevCaret);
-
-  // Clean and format
-  const numeric   = sanitizeToNumeric(prevValue);   // raw like "1234.5"
-  const formatted = formatNumericString(numeric);   // pretty like "1,234.5"
-
-  input.value = formatted;
-  input.dataset.rawValue = numeric && numeric !== '.' ? numeric : '0';
-
-  // Restore caret
-  let newCaret = formatted.length;
-
-  const newDotIdx = formatted.indexOf('.');
-  if (wasAfterDecimal && newDotIdx !== -1) {
-    // Place caret so that the same number of digits remain AFTER the decimal
-    // Scan from the end back to the decimal, counting digits
-    let seen = 0;
-    for (let i = formatted.length - 1; i > newDotIdx; i--) {
-      if (/\d/.test(formatted[i])) {
-        if (seen === digitsAfterDecimal) {
-          // caret should go just after this position
-          newCaret = i + 1;
-          break;
-        }
+  const prevDigitsBefore=(function(str,caret){let c=0;for(let i=0;i<Math.min(caret,str.length);i++){if(/\d/.test(str[i]))c++;}return c;})(prevValue,prevCaret);
+  const numeric=sanitizeToNumeric(prevValue);
+  const formatted=formatNumericString(numeric);
+  input.value=formatted;
+  input.dataset.rawValue = (numeric && numeric!=='.') ? numeric : '0';
+  let newCaret=formatted.length;
+  const newDotIdx=formatted.indexOf('.');
+  if(wasAfterDecimal && newDotIdx!==-1){
+    let seen=0;
+    for(let i=formatted.length-1;i>newDotIdx;i--){
+      if(/\d/.test(formatted[i])){
+        if(seen===digitsAfterDecimal){newCaret=i+1;break;}
         seen++;
       }
     }
-    // If we didn't break (e.g., shorter), put caret right after the decimal
-    if (seen < digitsAfterDecimal) newCaret = newDotIdx + 1;
-  } else {
-    // Fallback: keep same number of digits BEFORE the caret
-    let seen = 0;
-    for (let i = 0; i < formatted.length; i++) {
-      if (/\d/.test(formatted[i])) {
-        seen++;
-        if (seen === prevDigitsBefore) {
-          newCaret = i + 1;
-          break;
-        }
-      }
+    if(seen<digitsAfterDecimal) newCaret=newDotIdx+1;
+  }else{
+    let seen=0;
+    for(let i=0;i<formatted.length;i++){
+      if(/\d/.test(formatted[i])){seen++; if(seen===prevDigitsBefore){newCaret=i+1;break;}}
     }
   }
-
-  try { input.setSelectionRange(newCaret, newCaret); } catch (_) {}
-
+  try{input.setSelectionRange(newCaret,newCaret);}catch(_){}
   updateTotal();
 }
-
-
-/* Keep formatting on focus; select all if zero so first digit replaces it */
-function moneyFocusStable(e) {
-  const input = e.target;
-  const v = input.value;
-  if (v === '0.00' || v === '0') {
-    try { input.select(); } catch (_) {}
-  }
+function moneyFocusStable(e){const v=e.target.value; if(v==='0.00'||v==='0'){try{e.target.select();}catch(_){}}}
+function moneyInit(input){
+  const numeric=sanitizeToNumeric(input.value);
+  input.dataset.rawValue=(numeric && numeric!=='.')?numeric:'0';
+  input.value=numeric?formatNumericString(numeric):'';
 }
-
-/* Initialise an existing money input’s value/dataset */
-function moneyInit(input) {
-  const numeric = sanitizeToNumeric(input.value);
-  input.dataset.rawValue = numeric && numeric !== '.' ? numeric : '0';
-  input.value = numeric ? formatNumericString(numeric) : '';
-}
-
-/* Attach listeners to existing or newly-added rows */
-function wireMoneyInputs(root = document) {
-  root.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
-    if (input._moneyWired) return;
-    input._moneyWired = true;
-
+function wireMoneyInputs(root=document){
+  root.querySelectorAll('input[name="unit_price[]"]').forEach(input=>{
+    if(input._moneyWired) return;
+    input._moneyWired=true;
     moneyInit(input);
-
     input.addEventListener('focus', moneyFocusStable);
     input.addEventListener('input', moneyFormatWithCaret);
-    input.addEventListener('blur', moneyFormatWithCaret); // safety for mobile keyboards
+    input.addEventListener('blur', moneyFormatWithCaret);
   });
 }
 
 /* -------------------- Totals -------------------- */
-function formatMoneyNumber(num) {
-  return Number(num).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function parseMoney(str) {
-  if (!str) return 0;
-  const raw = String(str).replace(/[^0-9.]/g, "");
-  const num = parseFloat(raw);
-  return isNaN(num) ? 0 : num;
-}
-
-function updateTotal() {
-  const rows = document.querySelectorAll('#line-items-container tr');
-  let grand = 0;
-
-  rows.forEach(row => {
-    const qty = parseFloat(row.querySelector('input[name="quantity[]"]')?.value) || 0;
-
-    const priceInput = row.querySelector('input[name="unit_price[]"]');
-    const price = priceInput?.dataset.rawValue
-      ? parseFloat(priceInput.dataset.rawValue)
-      : parseMoney(priceInput?.value);
-
-    const line = qty * (isNaN(price) ? 0 : price);
-
-    const cell = row.querySelector('.row-total');
-    if (cell) cell.textContent = formatMoneyNumber(line);
-
-    grand += line;
+function formatMoneyNumber(num){return Number(num).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function parseMoney(str){if(!str)return 0; const raw=String(str).replace(/[^0-9.]/g,""); const num=parseFloat(raw); return isNaN(num)?0:num;}
+function updateTotal(){
+  const rows=document.querySelectorAll('#line-items-container tr');
+  let grand=0;
+  rows.forEach(row=>{
+    const qty=parseFloat(row.querySelector('input[name="quantity[]"]')?.value)||0;
+    const priceInput=row.querySelector('input[name="unit_price[]"]');
+    const price=priceInput?.dataset.rawValue ? parseFloat(priceInput.dataset.rawValue) : parseMoney(priceInput?.value);
+    const line=qty * (isNaN(price)?0:price);
+    const cell=row.querySelector('.row-total');
+    if(cell) cell.textContent=formatMoneyNumber(line);
+    grand+=line;
   });
-
-  const totalSpan = document.getElementById('po-total');
-  if (totalSpan) totalSpan.textContent = formatMoneyNumber(grand);
+  const totalSpan=document.getElementById('po-total');
+  if(totalSpan) totalSpan.textContent=formatMoneyNumber(grand);
 }
 
 /* -------------------- Manual contact helpers -------------------- */
-function setManualInputsEnabled(enabled) {
-  const manualContainer = document.getElementById('manual_contact_container');
-  const nameInput = document.getElementById('manual_contact_name');
-  const phoneInput = document.getElementById('manual_contact_phone');
-  const emailInput = document.getElementById('manual_contact_email');
-
-  manualContainer.style.display = enabled ? 'block' : 'none';
-  nameInput.disabled = !enabled;
-  phoneInput.disabled = !enabled;
-  emailInput.disabled = !enabled;
-  nameInput.required = !!enabled;
+function setManualInputsEnabled(enabled){
+  const wrap=document.getElementById('manual_contact_container');
+  const n=document.getElementById('manual_contact_name');
+  const p=document.getElementById('manual_contact_phone');
+  const e=document.getElementById('manual_contact_email');
+  wrap.style.display = enabled ? 'block' : 'none';
+  n.disabled=p.disabled=e.disabled=!enabled;
+  n.required=!!enabled;
 }
-function clearManualInputs() {
-  const n = document.getElementById('manual_contact_name');
-  const p = document.getElementById('manual_contact_phone');
-  const e = document.getElementById('manual_contact_email');
-  if (n) n.value = "";
-  if (p) p.value = "";
-  if (e) e.value = "";
-}
-function toggleManualContact() {
-  const contactSelect = document.getElementById('delivery_contact_id');
-  const isManual = contactSelect.value === 'manual';
+function clearManualInputs(){['manual_contact_name','manual_contact_phone','manual_contact_email'].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});}
+function toggleManualContact(){
+  const sel=document.getElementById('delivery_contact_id');
+  const isManual=(sel.value==='manual');
   clearManualInputs();
   setManualInputsEnabled(isManual);
 }
 
 /* -------------------- Address → contact filtering -------------------- */
-function filterContacts() {
-  const selectedAddressId = document.getElementById('delivery_address_id').value;
-  const contactSelect = document.getElementById('delivery_contact_id');
-  const options = contactSelect.options;
-
-  contactSelect.disabled = !selectedAddressId;
-
-  let currentSelectionValid = false;
-  const currentValue = contactSelect.value;
-
-  for (let i = 0; i < options.length; i++) {
-    const option = options[i];
-    const optionAddressId = option.getAttribute('data-address-id');
-
-    if (i === 0 || option.value === 'manual') {
-      option.hidden = false;
-      continue;
-    }
-    if (optionAddressId === selectedAddressId) {
-      option.hidden = false;
-      if (option.value === currentValue) currentSelectionValid = true;
-    } else {
-      option.hidden = true;
-    }
+function filterContacts(){
+  const addrId=document.getElementById('delivery_address_id').value;
+  const sel=document.getElementById('delivery_contact_id');
+  const opts=sel.options;
+  sel.disabled=!addrId;
+  let ok=false; const cur=sel.value;
+  for(let i=0;i<opts.length;i++){
+    const opt=opts[i];
+    const oa=opt.getAttribute('data-address-id');
+    if(i===0 || opt.value==='manual'){opt.hidden=false; continue;}
+    if(oa===addrId){opt.hidden=false; if(opt.value===cur) ok=true;}
+    else{opt.hidden=true;}
   }
-
-  if (!currentSelectionValid && currentValue !== '' && currentValue !== 'manual') {
-    contactSelect.value = '';
-  }
+  if(!ok && cur!=='' && cur!=='manual'){ sel.value=''; }
 }
 
 /* -------------------- Submit normalisation -------------------- */
-// Ensure backend gets raw numeric unit_price values (no commas/£)
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('po-form') || document.querySelector('form');
-  if (!form) return;
-  form.addEventListener('submit', () => {
-    document.querySelectorAll('input[name="unit_price[]"]').forEach(input => {
-      const raw = (input.dataset.rawValue != null)
-        ? String(input.dataset.rawValue)
-        : (input.value || '').replace(/[^0-9.]/g, '');
-      input.value = raw; // e.g. "11111.00"
+document.addEventListener('DOMContentLoaded', ()=>{
+  const form=document.getElementById('po-form') || document.querySelector('form');
+  if(!form) return;
+  form.addEventListener('submit', ()=>{
+    document.querySelectorAll('input[name="unit_price[]"]').forEach(input=>{
+      const raw = (input.dataset.rawValue != null) ? String(input.dataset.rawValue) : (input.value||'').replace(/[^0-9.]/g,'');
+      input.value=raw;
     });
   });
 });
 
 /* -------------------- Init -------------------- */
-window.addEventListener("DOMContentLoaded", function () {
-  // Money inputs + totals
+window.addEventListener('DOMContentLoaded', function(){
   wireMoneyInputs(document);
   updateTotal();
 
-  // Manual contact init
-  const contactSelect = document.getElementById('delivery_contact_id');
-  const manualContactNameEl = document.getElementById('manual_contact_name');
-  const manualContactName = manualContactNameEl ? manualContactNameEl.value.trim() : "";
-
-  if (manualContactName && contactSelect && !contactSelect.value) {
-    contactSelect.value = 'manual';
-  }
-
-  if (contactSelect) toggleManualContact();
+  const contactSelect=document.getElementById('delivery_contact_id');
+  const manualNameEl=document.getElementById('manual_contact_name');
+  const manualName=manualNameEl ? manualNameEl.value.trim() : "";
+  if(manualName && contactSelect && !contactSelect.value){ contactSelect.value='manual'; }
+  if(contactSelect) toggleManualContact();
   filterContacts();
 });
 
 /* -------------------- Disable save button on press -------------------- */
-(function () {
-  const form = document.getElementById('po-form');
-  const btn  = document.getElementById('save-btn');
-  if (!form || !btn) return;
-  let submitted = false;
-  form.addEventListener('submit', function (e) {
-    if (submitted) { e.preventDefault(); return; }
-    submitted = true;
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
+(function(){
+  const form=document.getElementById('po-form');
+  const btn=document.getElementById('save-btn');
+  if(!form || !btn) return;
+  let submitted=false;
+  form.addEventListener('submit', function(e){
+    if(submitted){ e.preventDefault(); return; }
+    submitted=true;
+    btn.disabled=true;
+    btn.textContent='Saving…';
   });
 })();
 </script>
-
 {% endblock %}
