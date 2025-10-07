@@ -2,10 +2,16 @@
 from __future__ import annotations
 import os
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from app.integrations.outlook_graph import create_draft_with_attachment
+
+# How long a lock is considered "fresh" (seconds)
+DEFAULT_LOCK_TTL = int(os.environ.get("PO_EMAIL_LOCK_TTL_SECONDS", "120"))
+# Where to store lock files
+DEFAULT_LOCK_DIR = os.environ.get("PO_EMAIL_LOCK_DIR", "/tmp/po_email_locks")
 
 
 def _po_num_str(po_number: int | str) -> str:
@@ -44,6 +50,48 @@ def build_subject_and_body(project_number: str, po_num_str: str) -> tuple[str, s
     return subject, body_text
 
 
+def _lock_path(lock_key: str) -> Path:
+    lock_dir = Path(DEFAULT_LOCK_DIR)
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    # keep it filesystem-safe
+    safe = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in lock_key)
+    return lock_dir / f"{safe}.lock"
+
+
+def _acquire_singleflight(lock_key: str, ttl_seconds: int = DEFAULT_LOCK_TTL) -> bool:
+    """
+    Try to acquire a single-flight lock for this key.
+    Returns True if this caller holds the lock; False if a fresh lock already exists.
+    Lock is a small file whose mtime indicates freshness.
+    """
+    p = _lock_path(lock_key)
+    now = time.time()
+
+    # If an existing fresh lock is present, do NOT proceed.
+    if p.exists():
+        try:
+            mtime = p.stat().st_mtime
+            if (now - mtime) < ttl_seconds:
+                return False  # another call very recently created/scheduled the draft
+            # stale lock -> replace
+        except Exception:
+            # if anything odd, try to replace
+            pass
+
+    # (Re)create/refresh the lock atomically
+    try:
+        # Write our timestamp; not strictly necessary but handy for debugging
+        with open(p, "w") as f:
+            f.write(str(int(now)))
+        # Double-check mtime is "now-ish"
+        os.utime(p, times=(now, now))
+        return True
+    except Exception as e:
+        logging.warning(f"Could not create lock file {p}: {e}")
+        # If we can't lock, fail-open (allow) to avoid blocking email entirely
+        return True
+
+
 def try_create_po_draft(
     archive_path: str | Path,
     po: Dict[str, Any],
@@ -51,12 +99,16 @@ def try_create_po_draft(
     to_recipients: Optional[List[str]] = None,
     cc_recipients: Optional[List[str]] = None,
     feature_flag_env: str = "EMAIL_DRAFT_ON_PO",
+    lock_key: Optional[str] = None,
+    lock_ttl_seconds: Optional[int] = None,
 ) -> Optional[dict]:
     """
     Creates an Outlook draft with the archived PDF attached.
     Safe to call from routes; failures are logged and won't raise.
 
-    Returns the created draft (dict) or None on skip/failure.
+    Idempotent: a per-PO single-flight lock prevents duplicate drafts within a short window.
+
+    Returns the created draft (dict) or None on skip/failure/duplicate.
     """
     # Feature flag
     if os.environ.get(feature_flag_env, "1").lower() not in {"1", "true", "yes"}:
@@ -78,13 +130,23 @@ def try_create_po_draft(
     po_number = po.get("po_number") or po.get("id") or "UNKNOWN"
     po_num_str = _po_num_str(po_number)
     project_number = _extract_project_number(po)
-
     subject, body_text = build_subject_and_body(project_number, po_num_str)
 
     # Recipients (optional)
     if to_recipients is None:
         supplier_email = _extract_supplier_email(po)
         to_recipients = [supplier_email] if supplier_email else []
+
+    # ---- Single-flight guard (prevents double drafts) ----
+    # Use explicit lock_key if passed, else derive from project/po and the attachment name
+    attachment_name = Path(str(archive_path)).name
+    lk = lock_key or f"{project_number}__{po_num_str}__{attachment_name}"
+    ttl = int(lock_ttl_seconds or DEFAULT_LOCK_TTL)
+
+    if not _acquire_singleflight(lock_key=lk, ttl_seconds=ttl):
+        logging.info(f"Email draft skipped due to fresh lock for key={lk}")
+        return None
+    # ------------------------------------------------------
 
     try:
         draft = create_draft_with_attachment(

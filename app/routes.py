@@ -746,14 +746,21 @@ def po_pdf(po_id):
     filename = f"{int(str(po_number)):06d}-{revision}.pdf"
 
     # Save directly into NETWORK_ARCHIVE_DIR (no subfolders now)
+
     archive_path = save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
 
-    # Only attempt if archiving worked
     if archive_path:
+        # Optional: pass a stable lock key so retries/page reloads won’t duplicate
+        lock_key = f"{po.get('projectnumber') or po.get('project_number')}-{int(po.get('po_number') or 0):06d}-{filename}"
+
         try_create_po_draft(
             archive_path=archive_path,
-            po=po,                                               # pass the PO dict you already have
-            mailbox_upn="purchasing@powersystemservices.co.uk",  # optional; else uses env MS_OUTLOOK_MAILBOX
+            po=po,
+            lock_key=lock_key,                 # ensures same key across both hits
+            # mailbox_upn="purchasing@yourdomain.com",  # optional
+            # to_recipients=["orders@supplier.com"],    # optional
+            # cc_recipients=["buyer@yourco.com"],       # optional
+            # lock_ttl_seconds=120,                     # optional, defaults to 120s
         )
 
     # Return PDF inline (unchanged behavior)
