@@ -1,7 +1,6 @@
 import requests
 import logging
 from flask import current_app
-from app.utils.status_utils import validate_po_status, POStatus
 import string
 import uuid
 from collections import defaultdict
@@ -44,6 +43,37 @@ def get_headers(include_content_type=True):
     if include_content_type:
         headers["Content-Type"] = "application/json"
     return headers
+
+def _headers_with_json(headers):
+    return {**headers, "Content-Type": "application/json"}
+
+def insert_delivery_contact(manual: dict) -> str:
+    """
+    Create a delivery_contacts row and return its UUID.
+    Expected keys in `manual`: name, email, phone, address_id (uuid), org (optional)
+    """
+    base, headers = _get_supabase_auth()
+    payload = {
+        "name": manual.get("name", "").strip(),
+        "email": manual.get("email", "").strip() or None,
+        "phone": manual.get("phone", "").strip() or None,
+        "address_id": manual.get("address_id"),  # must be a UUID
+        "organisation": manual.get("org", "").strip() or None,
+    }
+    # Generate id client-side so we can use return=minimal if desired
+    payload["id"] = str(uuid.uuid4())
+
+    url = f"{base}/rest/v1/delivery_contacts"
+    resp = requests.post(url, headers={**_headers_with_json(headers), "Prefer": "return=minimal"}, json=payload, timeout=30)
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+        except Exception:
+            err = {"body": resp.text}
+        current_app.logger.error("❌ delivery_contacts insert failed %s: %s | payload=%s", resp.status_code, err, payload)
+        resp.raise_for_status()
+
+    return payload["id"]
 
 
 # ------------------------------
@@ -369,6 +399,35 @@ def fetch_po_updated_at_for_ids_in_window(ids: list[str], first_month_start_iso:
     resp.raise_for_status()
     return resp.json() or []
 
+def fetch_active_pos_from_view(projectnumber=None, date_from=None, date_to=None,
+                               order_by="updated_at.desc"):
+    base, _ = _get_supabase_auth()
+    url = f"{base}/rest/v1/active_po_list"
+
+    params = {
+        "select": "*",
+    }
+
+    filters = []
+    
+    if projectnumber:
+        filters.append(f"projectnumber.ilike.%{projectnumber}%")
+    if date_from:
+        filters.append(f"updated_at.gte.{date_from}T00:00:00")
+    if date_to:
+        filters.append(f"updated_at.lt.{date_to}T00:00:00")
+
+    if filters:
+        params["and"] = f"({','.join(filters)})"
+
+    if order_by:
+        params["order"] = order_by
+
+    resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
+    resp.raise_for_status()
+    return resp.json() or []
+
+
 def fetch_pos_latest_from_po_table(project_id=None, date_from=None, date_to=None,
                                    statuses=None, order_by="updated_at.desc"):
     base, _ = _get_supabase_auth()
@@ -480,20 +539,17 @@ def _extract_manual_delivery_contact(data: dict) -> dict | None:
 def insert_po_bundle(data):
     """
     Inserts a new PO record and its associated metadata.
-    - If delivery_contact_id not provided but manual_contact_* present,
-      create a delivery_contacts row and link it.
+    - If delivery_contact_id not provided but manual_contact_* present, create a delivery_contacts row and link it.
     Returns the new PO UUID.
     """
-    status    = data.get("status", POStatus.DRAFT.value)
+    status    = data.get("status", "draft")
     revision  = data.get("current_revision", "a")
     po_number = data.get("po_number")
-
-    validate_po_status(status)
 
     # Create contact from manual fields if needed
     delivery_contact_id = data.get("delivery_contact_id") or None
     if not delivery_contact_id:
-        manual = _extract_manual_delivery_contact(data)
+        manual = _extract_manual_delivery_contact(data)  # assumes you already have this util
         if manual and manual.get("address_id"):
             try:
                 delivery_contact_id = insert_delivery_contact(manual)
@@ -502,20 +558,26 @@ def insert_po_bundle(data):
         else:
             current_app.logger.info("ℹ️ Skipping delivery_contacts insert (no manual or missing address_id).")
 
-    # Step 1: purchase_orders
+    # ---- Step 1: purchase_orders (request only the id back) ----
     po_payload = {
-        "project_id": data["project_id"],
-        "supplier_id": data["supplier_id"],
+        "project_id": data["project_id"],                         # TEXT (project number)
+        "item_seq": data["item_seq"],
+        "supplier_id": data["supplier_id"] or None,               # UUID or None (not "")
         "status": status,
         "current_revision": revision,
-        "delivery_contact_id": delivery_contact_id,
+        "delivery_contact_id": delivery_contact_id or None,       # UUID or None
     }
     if po_number:
         po_payload["po_number"] = po_number
 
     base, _ = _get_supabase_auth()
-    po_url = f"{base}/rest/v1/purchase_orders"
-    po_resp = requests.post(po_url, headers=get_headers(), json=po_payload, timeout=30)
+    po_url = f"{base}/rest/v1/purchase_orders?select=id"          # <-- only return id
+    po_resp = requests.post(
+        po_url,
+        headers=get_headers(),
+        json=po_payload,
+        timeout=30
+    )
 
     if po_resp.status_code >= 400:
         try:
@@ -528,19 +590,24 @@ def insert_po_bundle(data):
 
     po_id = po_resp.json()[0]["id"]
 
-    # Step 2: po_metadata
+    # ---- Step 2: po_metadata ----
     meta_payload = {
         "po_id": po_id,
-        "delivery_terms": data["delivery_terms"],
-        "delivery_date": data["delivery_date"],
+        "delivery_terms": data.get("delivery_terms", ""),
+        "delivery_date": data.get("delivery_date"),  # allow null
         "supplier_contact_name": data.get("supplier_contact_name", ""),
         "supplier_reference_number": data.get("supplier_reference_number", ""),
-        "test_certificates_required": data["test_certificates_required"],
+        "test_certificates_required": bool(data.get("test_certificates_required", False)),
         "active": True,
     }
 
     meta_url = f"{base}/rest/v1/po_metadata"
-    meta_resp = requests.post(meta_url, headers=get_headers(), json=meta_payload, timeout=30)
+    meta_resp = requests.post(
+        meta_url,
+        headers=get_headers(),
+        json=meta_payload,
+        timeout=30
+    )
     if meta_resp.status_code >= 400:
         try:
             err = meta_resp.json()

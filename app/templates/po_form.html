@@ -15,23 +15,20 @@
 <form method="POST" action="{{ form_action }}" id="po-form">
   <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 
-  {# --- Project / Item (single dropdown) --- #}
-  <label for="project_combo">Project / Item</label>
+  {# --- Project & Item (single dropdown) --- #}
+  <label for="project_combo">Project</label>
   <select id="project_combo" name="project_combo" required>
-    <option value="">-- Select Project / Item --</option>
+    <option value="">-- Select Project --</option>
     {% for o in project_items %}
-      {% set is_selected = (
-        (po_data.get('project_id')|string|trim) == (o.projectnumber|string|trim) and
-        ((po_data.get('item_seq') if po_data.get('item_seq') is not none else '')|string)
-          == ((o.item_seq if o.item_seq is not none else '')|string)
-        ) %}
-      <option
-        value="{{ o.projectnumber }}:{{ o.item_seq }}"
-        {% if is_selected %}selected{% endif %}
-      >
+      {% set pn_eq   = (po_data.get('project_id')|string|trim) == (o.projectnumber|string|trim) %}
+      {% set seq_lhs = (po_data.get('item_seq') if po_data.get('item_seq') is not none else '')|string %}
+      {% set seq_rhs = (o.item_seq if o.item_seq is not none else '')|string %}
+      {% set is_selected = pn_eq and (seq_lhs == seq_rhs) %}
+      <option value="{{ o.projectnumber }}:{{ o.item_seq }}" {% if is_selected %}selected{% endif %}>
         {{ o.option_label }}
       </option>
     {% endfor %}
+
   </select>
 
   {# Mirror fields (so backend can accept either project_combo or separate fields) #}
@@ -39,15 +36,19 @@
   <input type="hidden" id="item_seq"   name="item_seq"   value="{{ po_data.get('item_seq','') }}">
 
   {# --- Supplier --- #}
+
   <label for="supplier_id">Supplier</label>
+  {% set current_supplier = (po_data.get('supplier_id') | string) %}
   <select id="supplier_id" name="supplier_id" required>
+    <option value="">-- Select supplier --</option>
     {% for supplier in suppliers %}
       <option value="{{ supplier.id }}"
-        {% if po_data.get('supplier_id') == supplier.id %}selected{% endif %}>
+              {{ 'selected' if (supplier.id | string) == current_supplier else '' }}>
         {{ supplier.name }}
       </option>
     {% endfor %}
   </select>
+
 
   {# --- Delivery (address + contact) --- #}
   <div class="form-group">
@@ -234,18 +235,29 @@
     const v = combo.value || '';
     const idx = v.indexOf(':');
     if (idx > -1) {
-      hidPn.value = v.slice(0, idx);
-      hidSeq.value = v.slice(idx + 1);
-    } else {
-      hidPn.value = '';
-      hidSeq.value = '';
+      hidPn.value = v.slice(0, idx).trim();
+      hidSeq.value = v.slice(idx + 1).trim();
     }
+    // IMPORTANT: if no valid selection, leave hidden fields as-is
   }
 
   if (combo) {
     combo.addEventListener('change', sync);
-    // Initialise on load (preselect in edit mode)
-    sync();
+    // Initialise: try to set the combo from existing hidden fields,
+    // then run sync() only if we successfully matched an <option>.
+    (function initSelectFromHidden() {
+      const pn  = (hidPn?.value || '').trim();
+      const seq = (hidSeq?.value ?? '').toString().trim();
+      const target = pn && seq !== '' ? `${pn}:${seq}` : '';
+      if (target) {
+        // If the option exists, select it
+        for (const opt of combo.options) {
+          if (opt.value === target) { combo.value = target; break; }
+        }
+        // Only sync if we actually have a match (so we don't blank values)
+        if (combo.value === target) sync();
+      }
+    })();
   }
 })();
 

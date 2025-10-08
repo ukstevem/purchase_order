@@ -1,21 +1,29 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response, jsonify, current_app
 from app.supabase_client import (
     fetch_suppliers, 
-    fetch_delivery_addresses, 
+    fetch_delivery_addresses,
+    fetch_po_detail,
     fetch_projects, 
     insert_po_bundle, 
     insert_line_items, 
     fetch_delivery_contacts,
-    fetch_pos_latest_from_po_table
+    fetch_pos_latest_from_po_table,
+    fetch_active_pos_from_view,
+    fetch_project_po_summary,
+    fetch_last_issued_dates_any,
+    fetch_accounts_overview_latest,
+    _get_supabase_auth, 
+    get_headers,
+    deactivate_po_data,
     )
 from app.utils.forms import parse_po_form
-from app.supabase_client import fetch_projects_map, fetch_suppliers, fetch_delivery_addresses, fetch_delivery_contacts, _get_supabase_auth, get_headers, fetch_project_po_summary, fetch_last_issued_dates_any, fetch_accounts_overview_latest
+from .utils.revision import get_next_revision, compute_updated_revision
 from app.utils.status_utils import (
     allowed_next_statuses, 
     is_forward_or_same, 
-    coerce_rev_on_leaving_draft
+    coerce_rev_on_leaving_draft,
+    validate_po_status
     )
-from app.utils.revision import compute_updated_revision
 from app.utils.pdf_archive import save_pdf_archive
 from weasyprint import HTML, CSS
 from datetime import datetime, date
@@ -26,7 +34,6 @@ import base64, uuid, requests
 from pathlib import Path
 from app.integrations.outlook_graph import create_draft_with_attachment
 from app.services.po_email import try_create_po_draft
-from app.utils.revision import get_next_revision
 
 main = Blueprint("main", __name__)
 
@@ -68,35 +75,27 @@ def index():
 def home_redirect():
     return redirect(url_for("main.index"))
 
-
 @main.route("/po-list")
 def po_list():
-    from flask import request, render_template, flash, current_app
 
     projectnumber = request.args.get("projectnumber")
-    date_from = request.args.get("from")    # YYYY-MM-DD inclusive
-    date_to   = request.args.get("to")      # YYYY-MM-DD exclusive
+    date_from = request.args.get("from")
+    date_to   = request.args.get("to")
 
-    # NEW: sorting inputs (defaults to PO number, newest first)
     sort = request.args.get("sort", "po_number")
     dir_ = request.args.get("dir", "desc").lower()
 
-    # whitelist to avoid invalid PostgREST order columns
     allowed_sorts = {"po_number", "updated_at"}
     if sort not in allowed_sorts:
         sort = "po_number"
     dir_ = "asc" if dir_ == "asc" else "desc"
-
     order_by = f"{sort}.{dir_}"
 
     try:
-        project_id = projectnumber or None
-
-        pos = fetch_pos_latest_from_po_table(
-            project_id=project_id,
+        pos = fetch_active_pos_from_view(
+            projectnumber=projectnumber,
             date_from=date_from,
             date_to=date_to,
-            statuses=["approved", "issued", "complete"],
             order_by=order_by,
         )
 
@@ -113,7 +112,6 @@ def po_list():
         sort=sort,
         dir=dir_,
     )
-
 
 
 @main.route("/po/<po_id>")
@@ -224,14 +222,6 @@ def create_po():
             flash(f"Error creating PO: {e}", "danger")
 
     # -------- GET: render create form --------
-    import requests
-    from .supabase_client import (
-        fetch_suppliers,
-        fetch_delivery_addresses,
-        fetch_delivery_contacts,
-        _get_supabase_auth,
-        get_headers,
-    )
 
     suppliers = fetch_suppliers()
 
@@ -293,57 +283,69 @@ def create_po():
 def edit_po(po_id):
     import uuid
     import requests
-    from flask import current_app, session, render_template, request, redirect, url_for, flash
+    from flask import session, render_template, request, redirect, url_for, flash, current_app
 
-    # --- tiny Supabase helpers (local to this route) ---
-    def _sb():
-        base = current_app.config["SUPABASE_URL"].rstrip("/")
-        key  = current_app.config["SUPABASE_API_KEY"]
-        hdr  = {
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation",
-        }
-        return base, hdr
+    def _to_int(val):
+        try:
+            return int(str(val).strip())
+        except Exception:
+            return None
 
-    # Make PATCH resilient: only send columns that exist on the row
+    # ---- PATCH helpers (kept for the post-release optional-no-bump path) ----
     def _patch_po(po_id: str, fields: dict):
-        base, hdr = _sb()
-        g = requests.get(f"{base}/rest/v1/purchase_orders?id=eq.{po_id}&select=*",
-                         headers=hdr, timeout=20)
+        base, _ = _get_supabase_auth()
+        g = requests.get(
+            f"{base}/rest/v1/purchase_orders?id=eq.{po_id}&select=*",
+            headers=get_headers(False),
+            timeout=20
+        )
         g.raise_for_status()
         rows = g.json() or []
         if not rows:
             return {}
+
         allowed = set(rows[0].keys()) - {"id", "created", "modified", "active"}
-        clean = {k: v for k, v in (fields or {}).items() if k in allowed and k != "idempotency_key"}
+        clean = {k: v for k, v in (fields or {}).items()
+                 if k in allowed and k != "idempotency_key"}
+
+        if "item_seq" in clean and clean["item_seq"] is not None:
+            clean["item_seq"] = _to_int(clean["item_seq"])
+
         if not clean:
             return {}
-        r = requests.patch(f"{base}/rest/v1/purchase_orders?id=eq.{po_id}",
-                           headers=hdr, json=clean, timeout=30)
+
+        r = requests.patch(
+            f"{base}/rest/v1/purchase_orders?id=eq.{po_id}&select=id",
+            headers={**get_headers(), "Prefer": "return=representation"},
+            json=clean,
+            timeout=30
+        )
         r.raise_for_status()
         return r.json()[0] if r.json() else {}
 
     def _patch_po_metadata(po_id: str, md_fields: dict):
-        base, hdr = _sb()
+        base, _ = _get_supabase_auth()
         g = requests.get(
             f"{base}/rest/v1/po_metadata?po_id=eq.{po_id}&active=is.true&select=*",
-            headers=hdr, timeout=20
+            headers=get_headers(False),
+            timeout=20
         )
         g.raise_for_status()
-        rows = g.json()
+        rows = g.json() or []
         if not rows:
             return {}
+
         allowed = set(rows[0].keys()) - {"id", "po_id", "created", "modified", "active"}
         clean = {k: v for k, v in (md_fields or {}).items()
                  if k in allowed and v is not None and k != "idempotency_key"}
         if not clean:
             return {}
-        hdr_min = dict(hdr); hdr_min["Prefer"] = "return=minimal"
+
         r = requests.patch(
             f"{base}/rest/v1/po_metadata?po_id=eq.{po_id}&active=is.true",
-            headers=hdr_min, json=clean, timeout=30
+            headers={**get_headers(), "Prefer": "return=minimal"},
+            json=clean,
+            timeout=30
         )
         if r.status_code not in (200, 204):
             current_app.logger.error("PATCH po_metadata failed (%s): %s", r.status_code, r.text)
@@ -351,12 +353,16 @@ def edit_po(po_id):
         return {}
 
     def _replace_line_items(po_id: str, items: list):
-        base, hdr = _sb()
-        rdel = requests.delete(f"{base}/rest/v1/po_line_items?po_id=eq.{po_id}",
-                               headers=hdr, timeout=30)
+        base, _ = _get_supabase_auth()
+        rdel = requests.delete(
+            f"{base}/rest/v1/po_line_items?po_id=eq.{po_id}",
+            headers={**get_headers(), "Prefer": "return=minimal"},
+            timeout=30
+        )
         if rdel.status_code not in (200, 204):
             current_app.logger.error("DELETE po_line_items failed (%s): %s", rdel.status_code, rdel.text)
             rdel.raise_for_status()
+
         if items:
             payload = []
             for it in items:
@@ -365,8 +371,13 @@ def edit_po(po_id):
                     row.pop(k, None)
                 row["po_id"] = po_id
                 payload.append(row)
-            rins = requests.post(f"{base}/rest/v1/po_line_items",
-                                 headers=hdr, json=payload, timeout=30)
+
+            rins = requests.post(
+                f"{base}/rest/v1/po_line_items",
+                headers={**get_headers(), "Prefer": "return=representation"},
+                json=payload,
+                timeout=30
+            )
             rins.raise_for_status()
         return True
 
@@ -377,25 +388,12 @@ def edit_po(po_id):
             return False
 
     def _coerce_rev_on_leaving_draft(prev_rev, old_status, new_status):
+        # Keep your rule: when leaving draft, use numeric '1' if not already numeric
         if (old_status or '').lower() == 'draft' and (new_status or '').lower() != 'draft':
             return str(prev_rev).strip() if _is_numeric_ge_1(prev_rev) else '1'
         return prev_rev
 
-    from .supabase_client import (
-        fetch_po_detail,
-        deactivate_po_data,
-        insert_po_bundle,
-        insert_line_items,
-        fetch_suppliers,
-        fetch_delivery_addresses,
-        fetch_delivery_contacts,
-        _get_supabase_auth,
-        get_headers,
-    )
-    from .utils.revision import get_next_revision, compute_updated_revision
-    from .utils.status_utils import validate_po_status
-
-    # ---------------- POST: create OR patch ----------------
+    # ---------------- POST: handle save ----------------
     if request.method == "POST":
         try:
             # 🔒 Idempotency
@@ -404,7 +402,7 @@ def edit_po(po_id):
                 flash("This form was already submitted or the token is invalid.", "warning")
                 return redirect(url_for("main.edit_po", po_id=po_id))
 
-            # 1) Existing PO
+            # 1) Load existing PO
             po = fetch_po_detail(po_id)
             if not po:
                 flash("Original PO not found.", "danger")
@@ -416,7 +414,7 @@ def edit_po(po_id):
                 flash("❌ This PO is marked as complete or cancelled and cannot be edited.", "warning")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
-            # 2) Parse form & status
+            # 2) Form & status
             new_status = (request.form.get("status") or po["status"]).lower()
             if current_status != "draft" and new_status == "draft":
                 flash("❌ You cannot revert an approved PO back to draft.", "danger")
@@ -425,17 +423,14 @@ def edit_po(po_id):
 
             metadata, line_items = parse_po_form(request.form)
 
-            # ✅ Keep/Update project_id (PN text) + item_seq from form if present
-            selected_pn = (request.form.get("project_id") or "").strip()
-            if selected_pn:
-                metadata["project_id"] = selected_pn
-            else:
-                metadata["project_id"] = po.get("project_id")
-
-            metadata["item_seq"] = (request.form.get("item_seq") or metadata.get("item_seq") or po.get("item_seq"))
+            # Project/Item + flags
+            selected_pn  = (request.form.get("project_id") or "").strip()
+            selected_seq = _to_int(request.form.get("item_seq"))
+            metadata["project_id"] = selected_pn or po.get("project_id")
+            metadata["item_seq"]   = selected_seq if selected_seq is not None else _to_int(po.get("item_seq"))
             metadata["test_certificates_required"] = _f_bool("test_cert_required")
 
-            # Address/contact rules (unchanged)
+            # Delivery/address/contact (no manual address allowed)
             manual_address_text = (request.form.get("manual_delivery_address") or "").strip()
             if manual_address_text:
                 flash("Manual delivery address is not allowed. Please select a Delivery Address from the dropdown.", "danger")
@@ -479,66 +474,53 @@ def edit_po(po_id):
             metadata["delivery_address_id"]     = delivery_address_id
             metadata["manual_delivery_address"] = None
 
-            # 🔁 Revision flow
-            bump = (request.form.get("bump_revision") == "1")
-            bump_allowed = new_status in {"approved", "issued"}
-            if manual_contact_selected:
-                bump = True
+            # 3) Bump rules
+            # ALWAYS bump when current is draft (your new requirement)
+            always_bump = (current_status == "draft")
 
+            # after release, optional bump only for approved/issued
+            bump_flag = (request.form.get("bump_revision") == "1")
+            bump_allowed_after_release = (new_status in {"approved", "issued"})
+
+            # --- Decide path ---
+            if always_bump:
+                # Bump from draft, lexicographic if staying in draft; else coerce to numeric on leaving draft
+                next_rev = get_next_revision(str(current_rev).strip())
+                target_rev = _coerce_rev_on_leaving_draft(next_rev, current_status, new_status)
+
+                # Deactivate old snapshot
+                deactivate_po_data(po_id)
+
+                # New INSERT snapshot
+                metadata["project_id"]              = metadata.get("project_id") or po.get("project_id")
+                metadata["supplier_id"]             = po["supplier_id"]           # keep same supplier in new rev
+                metadata["po_number"]               = po["po_number"]             # keep same number
+                metadata["status"]                  = new_status
+                metadata["current_revision"]        = target_rev
+                metadata["delivery_address_id"]     = delivery_address_id
+                metadata["manual_delivery_address"] = None
+                metadata["item_seq"]                = metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq"))
+
+                new_po_id = insert_po_bundle(metadata)
+                for item in line_items:
+                    item["po_id"] = new_po_id
+                insert_line_items(line_items)
+
+                flash(f"PO revision created (rev {target_rev}).", "success")
+                return redirect(url_for("main.po_preview", po_id=new_po_id))
+
+            # Not in draft anymore:
             TERMINAL = {"issued", "complete", "cancelled"}
-            if new_status in TERMINAL:
-                if bump and bump_allowed:
-                    target_rev = get_next_revision(str(current_rev).strip())
-                    target_rev = _coerce_rev_on_leaving_draft(target_rev, current_status, new_status)
 
-                    deactivate_po_data(po_id)
-
-                    # New INSERT snapshot
-                    metadata["project_id"]             = metadata.get("project_id") or po.get("project_id")
-                    metadata["supplier_id"]            = po["supplier_id"]
-                    metadata["po_number"]              = po["po_number"]
-                    metadata["status"]                 = new_status
-                    metadata["current_revision"]       = target_rev
-                    metadata["delivery_address_id"]    = delivery_address_id
-                    metadata["manual_delivery_address"]= None
-                    metadata["item_seq"]               = metadata.get("item_seq") or po.get("item_seq")
-
-                    new_po_id = insert_po_bundle(metadata)
-                    for item in line_items:
-                        item["po_id"] = new_po_id
-                    insert_line_items(line_items)
-
-                    flash(f"PO revision created successfully (rev {target_rev}).", "success")
-                    return redirect(url_for("main.po_preview", po_id=new_po_id))
-
-                # No bump → PATCH in place
+            # If user chose not to bump and it's allowed (approved/issued), do PATCH
+            if bump_allowed_after_release and not bump_flag:
                 po_fields = {
-                    "project_id":      metadata.get("project_id") or po.get("project_id"),
-                    "supplier_id":     po["supplier_id"],
-                    "po_number":       po["po_number"],
-                    "status":          new_status,
-                    "current_revision": _coerce_rev_on_leaving_draft(current_rev, current_status, new_status),
-                    "item_seq":        metadata.get("item_seq") or po.get("item_seq"),
-                }
-                md_fields = {k: v for k, v in metadata.items()
-                             if k not in {"project_id","supplier_id","po_number","status","current_revision","item_seq","idempotency_key"}}
-
-                _patch_po(po_id, po_fields)
-                _patch_po_metadata(po_id, md_fields)
-                _replace_line_items(po_id, line_items)
-
-                flash(f"Status set to {new_status} (rev {po_fields['current_revision']}).", "success")
-                return redirect(url_for("main.po_preview", po_id=po_id))
-
-            # Approved → Approved (no bump)
-            if current_status == "approved" and new_status == "approved" and not bump:
-                po_fields = {
-                    "project_id":      metadata.get("project_id") or po.get("project_id"),
-                    "supplier_id":     po["supplier_id"],
-                    "po_number":       po["po_number"],
-                    "status":          "approved",
-                    "current_revision": current_rev,
-                    "item_seq":        metadata.get("item_seq") or po.get("item_seq"),
+                    "project_id":        metadata.get("project_id") or po.get("project_id"),
+                    "supplier_id":       po["supplier_id"],
+                    "po_number":         po["po_number"],
+                    "status":            new_status,
+                    "current_revision":  current_rev,
+                    "item_seq":          metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq")),
                 }
                 md_fields = {k: v for k, v in metadata.items()
                              if k not in {"project_id","supplier_id","po_number","status","current_revision","item_seq","idempotency_key"}}
@@ -550,20 +532,21 @@ def edit_po(po_id):
                 flash("Changes saved (no revision bump).", "success")
                 return redirect(url_for("main.po_preview", po_id=po_id))
 
-            # INSERT new revision (bump or status change)
-            target_rev = get_next_revision(str(current_rev).strip()) if bump \
-                         else compute_updated_revision(current_rev, current_status, new_status)
+            # Otherwise: bump (new revision) for transitions/editing after release
+            target_rev = get_next_revision(str(current_rev).strip()) \
+                         if bump_flag else compute_updated_revision(current_rev, current_status, new_status)
             target_rev = _coerce_rev_on_leaving_draft(target_rev, current_status, new_status)
+
             deactivate_po_data(po_id)
 
-            metadata["project_id"]             = metadata.get("project_id") or po.get("project_id")
-            metadata["supplier_id"]            = po["supplier_id"]
-            metadata["po_number"]              = po["po_number"]
-            metadata["status"]                 = new_status
-            metadata["current_revision"]       = target_rev
-            metadata["delivery_address_id"]    = delivery_address_id
-            metadata["manual_delivery_address"]= None
-            metadata["item_seq"]               = metadata.get("item_seq") or po.get("item_seq")
+            metadata["project_id"]              = metadata.get("project_id") or po.get("project_id")
+            metadata["supplier_id"]             = po["supplier_id"]
+            metadata["po_number"]               = po["po_number"]
+            metadata["status"]                  = new_status
+            metadata["current_revision"]        = target_rev
+            metadata["delivery_address_id"]     = delivery_address_id
+            metadata["manual_delivery_address"] = None
+            metadata["item_seq"]                = metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq"))
 
             new_po_id = insert_po_bundle(metadata)
             for item in line_items:
@@ -580,12 +563,12 @@ def edit_po(po_id):
             return redirect(url_for("main.edit_po", po_id=po_id))
 
     # ---------------- GET: render edit form ----------------
-    from .supabase_client import fetch_po_detail
     po = fetch_po_detail(po_id)
     if not po:
         return render_template("404.html"), 404
 
     po_metadata = _active_po_metadata(po)
+    suppliers = fetch_suppliers()
 
     delivery_contact = po.get("delivery_contact")
     delivery_address = po.get("delivery_address")
@@ -607,10 +590,10 @@ def edit_po(po_id):
 
     delivery_contact_id = delivery_contact.get("id") if isinstance(delivery_contact, dict) else None
 
-    # 🔁 Dropdown from project_register_items
-    from .supabase_client import _get_supabase_auth, get_headers
+    # --- Project / Item options (same as create) + fallback for current selection ---
     base, _ = _get_supabase_auth()
     hdr = get_headers(False)
+
     items = []
     try:
         r = requests.get(
@@ -625,7 +608,8 @@ def edit_po(po_id):
         )
         r.raise_for_status()
         items = r.json() or []
-    except Exception:
+    except Exception as e:
+        current_app.logger.warning("edit_po: failed to load project_register_items: %s", e)
         items = []
 
     project_items = []
@@ -642,11 +626,30 @@ def edit_po(po_id):
             "option_label": f"{pn}-{seq_str} - {desc}".rstrip(" -"),
         })
 
-    # Build po_data for template (put PN into project_id so Jinja selected check matches)
+    # Ensure current PN/SEQ appears even if not present in the register
+    cur_pn  = (po.get("project_id") or "").strip()
+    cur_seq = "" if po.get("item_seq") in (None, "") else str(po.get("item_seq")).strip()
+    if cur_pn and cur_seq != "":
+        found = any(
+            (it.get("projectnumber","").strip() == cur_pn) and
+            (str(it.get("item_seq","")).strip() == cur_seq)
+            for it in project_items
+        )
+        if not found:
+            project_items.append({
+                "projectnumber": cur_pn,
+                "item_seq": cur_seq,
+                "option_label": f"{cur_pn}-{cur_seq} - (current selection)",
+            })
+
+    # Supplier id as string for template equality
+    sup_id = po.get("supplier_id") or (po.get("supplier") or {}).get("id")
+    supplier_id_str = str(sup_id) if sup_id else ""
+
     po_data = {
-        "project_id": (po.get("project_id") or "").strip(),        # PN text
+        "project_id": (po.get("project_id") or "").strip(),
         "item_seq": "" if po.get("item_seq") is None else str(po.get("item_seq")),
-        "supplier_id": po["supplier_id"],
+        "supplier_id": supplier_id_str,
         "delivery_terms": po_metadata.get("delivery_terms", ""),
         "delivery_date": po_metadata.get("delivery_date", ""),
         "shipping_method": po_metadata.get("shipping_method", ""),
@@ -682,11 +685,12 @@ def edit_po(po_id):
         po_data=po_data,
         statuses=statuses_forward,
         project_items=project_items,
-        suppliers=fetch_suppliers(),
+        suppliers=suppliers,
         delivery_contacts=fetch_delivery_contacts(),
         delivery_addresses=fetch_delivery_addresses(),
         idempotency_key=idempotency_key,
     )
+
 
 @main.route("/po/<po_id>/pdf")
 def po_pdf(po_id):
