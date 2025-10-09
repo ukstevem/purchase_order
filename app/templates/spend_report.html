@@ -33,13 +33,13 @@
             {% set val = (spends.get(m, 0) or 0) %}
             <td class="num">
               {% if val %}
-                <a class="drill-link"
-                   href="{{ url_for('main.po_list',
-                                    projectnumber=project,
-                                    **{'from': month_from[m], 'to': month_to[m]}) }}"
-                   title="Show POs for {{ project }} in {{ m | format_date('%B %Y') }}">
-                  {{ val | accounting }}
-                </a>
+              <a class="drill-link"
+                href="{{ url_for('main.po_list',
+                                  project=project,                              
+                                  **{'from': month_from[m], 'to': month_to[m]}) }}"
+                title="Show POs for {{ project }} in {{ m | format_date('%B %Y') }}">
+                {{ val | accounting }}
+              </a>
               {% else %}
                 {{ val | accounting }}
               {% endif %}
@@ -50,11 +50,11 @@
           <td class="num sticky-right total">
             {% set row_total = (row_totals[project] or 0) %}
             {% if row_total %}
-              <a class="drill-link"
-                 href="{{ url_for('main.po_list', projectnumber=project) }}"
-                 title="Show all POs for {{ project }}">
-                {{ row_total | accounting }}
-              </a>
+            <a class="drill-link"
+              href="{{ url_for('main.po_list', project=project) }}"
+              title="Show all POs for {{ project }}">
+              {{ row_total | accounting }}
+            </a>
             {% else %}
               {{ row_total | accounting }}
             {% endif %}

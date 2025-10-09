@@ -139,17 +139,113 @@ def fetch_suppliers():
     r.raise_for_status()
     return r.json()
 
-# DEPRECATED: keep name but implement via fetch_projects_map for backward compatibility
+import logging
+import requests
+
+# You already have:
+# from app.supabase_client import _get_supabase_auth, get_headers
+
+
+# ---- PROJECTS (project_register) ----
+
 def fetch_projects():
     """
-    Deprecated shim.
-    Historically returned a LIST of dicts. We now build that list from fetch_projects_map()
-    so existing callers/templates keep working without changes.
-
     Returns: [{"projectnumber": str, "projectdescription": str}, ...] sorted by projectnumber.
+    `projectdescription` left blank because project_register has no description column.
     """
     proj_map = fetch_projects_map()
-    # Build a sorted list to preserve the old ordering by projectnumber
+    return [
+        {"projectnumber": pn, "projectdescription": data.get("projectdescription", "")}
+        for pn, data in sorted(proj_map.items(), key=lambda kv: kv[0])
+    ]
+
+
+def fetch_projects_map():
+    """
+    Returns { projectnumber: {"projectnumber": str, "projectdescription": ""} }
+    Single call to project_register; no probing of other tables/columns.
+    """
+    base, _ = _get_supabase_auth()
+    headers = get_headers(False)
+
+    rel = "project_register"
+    params = {"select": "projectnumber", "order": "projectnumber.asc", "limit": 10000}
+
+    resp = requests.get(f"{base}/rest/v1/{rel}", headers=headers, params=params, timeout=30)
+    if resp.status_code != 200:
+        logging.error("fetch_projects_map: %s failed (%s): %s", rel, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    rows = resp.json() or []
+    return {
+        str(r["projectnumber"]).strip(): {
+            "projectnumber": str(r["projectnumber"]).strip(),
+            "projectdescription": "",  # no description column in project_register
+        }
+        for r in rows
+        if r.get("projectnumber") is not None
+    }
+
+
+# ---- SUPPLIERS (master table) ----
+
+def fetch_suppliers(limit: int = 10000):
+    """
+    Returns a sorted list[str] of supplier names for dropdown hydration.
+    Source: suppliers(name) — full master list (id, name, address, type).
+    """
+    base, _ = _get_supabase_auth()
+    headers = get_headers(False)
+
+    rel = "suppliers"
+    params = {"select": "name", "order": "name.asc", "limit": limit}
+
+    resp = requests.get(f"{base}/rest/v1/{rel}", headers=headers, params=params, timeout=30)
+    if resp.status_code != 200:
+        logging.warning("fetch_suppliers: %s failed (%s): %s", rel, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    rows = resp.json() or []
+    names = {
+        str(r.get("name")).strip()
+        for r in rows
+        if r.get("name")
+    }
+    return sorted(names)
+
+
+# ---- OPTIONAL: Suppliers from the active view (if you prefer only names that appear in POs) ----
+def fetch_suppliers_from_view(limit: int = 10000):
+    """
+    Returns a sorted list[str] of supplier names that currently appear in active_po_list.
+    Source: active_po_list(supplier_name).
+    """
+    base, _ = _get_supabase_auth()
+    headers = get_headers(False)
+
+    rel = "active_po_list"
+    params = {"select": "supplier_name", "order": "supplier_name.asc", "limit": limit}
+
+    resp = requests.get(f"{base}/rest/v1/{rel}", headers=headers, params=params, timeout=30)
+    if resp.status_code != 200:
+        logging.warning("fetch_suppliers_from_view: %s failed (%s): %s", rel, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    rows = resp.json() or []
+    names = {
+        str(r.get("supplier_name")).strip()
+        for r in rows
+        if r.get("supplier_name")
+    }
+    return sorted(names)
+
+
+def fetch_projects():
+    """
+    Returns: [{"projectnumber": str, "projectdescription": str}, ...] sorted by projectnumber.
+    `projectdescription` left blank because project_register has no description column.
+    """
+    proj_map = fetch_projects_map()
     return [
         {"projectnumber": pn, "projectdescription": data.get("projectdescription", "")}
         for pn, data in sorted(proj_map.items(), key=lambda kv: kv[0])
@@ -238,46 +334,54 @@ def fetch_last_issued_dates(po_numbers: list[str], first_month_start_iso: str, n
 
 def fetch_projects_map():
     """
-    Returns { projectnumber (str): {"projectnumber": str, "projectdescription": str} }
-    Uses projects_register (new) with fallbacks for older envs.
+    Returns { projectnumber: {"projectnumber": str, "projectdescription": ""} }
+    Single call to project_register; no probing of other tables/columns.
     """
     base, _ = _get_supabase_auth()
     headers = get_headers(False)
 
-    selects = "projectnumber,projectdescription"
-    tries = [
-        "projects_register",   # new, plural
-        "project_register",    # old, singular
-        "projects",            # oldest
-    ]
+    rel = "project_register"
+    params = {"select": "projectnumber", "order": "projectnumber.asc", "limit": 10000}
 
-    last_err = None
-    for rel in tries:
-        url = f"{base}/rest/v1/{rel}"
-        params = {
-            "select": selects,
-            "order": "projectnumber.asc",
-            "limit": 10000,
+    resp = requests.get(f"{base}/rest/v1/{rel}", headers=headers, params=params, timeout=30)
+    if resp.status_code != 200:
+        logging.error("fetch_projects_map: %s failed (%s): %s", rel, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    rows = resp.json() or []
+    return {
+        str(r["projectnumber"]).strip(): {
+            "projectnumber": str(r["projectnumber"]).strip(),
+            "projectdescription": "",  # no description column in project_register
         }
-        try:
-            resp = requests.get(url, headers=headers, params=params, timeout=30)
-            if resp.status_code != 200:
-                logging.warning("fetch_projects_map: %s failed (%s): %s", rel, resp.status_code, resp.text)
-                resp.raise_for_status()
-            rows = resp.json() or []
-            return {
-                r["projectnumber"]: {
-                    "projectnumber": r["projectnumber"],
-                    "projectdescription": r.get("projectdescription", "")
-                }
-                for r in rows
-            }
-        except requests.HTTPError as e:
-            last_err = e
-            continue
+        for r in rows
+        if r.get("projectnumber") is not None
+    }
 
-    # If we got here, all attempts failed
-    raise RuntimeError(f"Unable to load projects from any known relation. Last error: {last_err}")
+
+def fetch_suppliers(limit: int = 10000):
+    """
+    Returns a sorted list[str] of supplier names for dropdown hydration.
+    Source: suppliers(name) — full master list (id, name, address, type).
+    """
+    base, _ = _get_supabase_auth()
+    headers = get_headers(False)
+
+    rel = "suppliers"
+    params = {"select": "name", "order": "name.asc", "limit": limit}
+
+    resp = requests.get(f"{base}/rest/v1/{rel}", headers=headers, params=params, timeout=30)
+    if resp.status_code != 200:
+        logging.warning("fetch_suppliers: %s failed (%s): %s", rel, resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    rows = resp.json() or []
+    names = {
+        str(r.get("name")).strip()
+        for r in rows
+        if r.get("name")
+    }
+    return sorted(names)
 
 
 
@@ -399,7 +503,7 @@ def fetch_po_updated_at_for_ids_in_window(ids: list[str], first_month_start_iso:
     resp.raise_for_status()
     return resp.json() or []
 
-def fetch_active_pos_from_view(projectnumber=None, date_from=None, date_to=None,
+def fetch_active_pos_from_view(projectnumber=None, supplier_name=None, status=None, date_from=None, date_to=None,
                                order_by="updated_at.desc"):
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/active_po_list"
@@ -409,9 +513,13 @@ def fetch_active_pos_from_view(projectnumber=None, date_from=None, date_to=None,
     }
 
     filters = []
-    
+
     if projectnumber:
         filters.append(f"projectnumber.ilike.%{projectnumber}%")
+    if supplier_name:
+        params["supplier_name"] = f"eq.{supplier_name}"
+    if status:
+        params["status"] = f"eq.{status}"
     if date_from:
         filters.append(f"updated_at.gte.{date_from}T00:00:00")
     if date_to:
@@ -767,6 +875,10 @@ def insert_po_metadata(meta):
     resp.raise_for_status()
 
 
+import string
+from datetime import datetime
+import requests
+
 def get_next_revision(po_id, status):
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/purchase_orders"
@@ -777,25 +889,46 @@ def get_next_revision(po_id, status):
     current = po.get("current_revision")
     current_status = po.get("status")
 
+    next_rev = None
+    update_release_time = False
+
     # From draft to released
     if current_status != "released" and status == "released":
-        return "1"
+        next_rev = "1"
+        update_release_time = True
 
-    # Still in draft
-    if status == "draft":
+    # Still in draft — bump alphabetically
+    elif status == "draft":
         if not current:
-            return "a"
-        next_char = chr(ord(current) + 1)
-        if next_char in string.ascii_lowercase:
-            return next_char
+            next_rev = "a"
         else:
-            raise Exception("Too many draft revisions")
+            next_char = chr(ord(current) + 1)
+            if next_char in string.ascii_lowercase:
+                next_rev = next_char
+            else:
+                raise Exception("Too many draft revisions")
 
-    # Already released, now increment numerically
-    try:
-        return str(int(current) + 1)
-    except (ValueError, TypeError):
-        return "1"
+    # Already released — bump numerically
+    else:
+        try:
+            next_rev = str(int(current) + 1)
+            update_release_time = True
+        except (ValueError, TypeError):
+            next_rev = "1"
+            update_release_time = True
+
+    # --- Update last_release timestamp if needed ---
+    if update_release_time:
+        patch_url = f"{base}/rest/v1/purchase_orders"
+        patch_params = {"id": f"eq.{po_id}"}
+        now = datetime.utcnow().isoformat()
+        patch_data = {"last_release": now}
+        requests.patch(
+            patch_url, headers=get_headers(), params=patch_params, json=patch_data, timeout=30
+        )
+
+    return next_rev
+
 
 
 def fetch_all_po_revisions(po_number: int):

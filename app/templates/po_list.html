@@ -5,17 +5,65 @@
 {% block content %}
   <a href="{{ url_for('main.create_po') }}" class="btn">Create New PO</a>
 
-  <form method="get" style="margin: 1em 0;">
-    <label>
-      Filter by Project Number:
-      <input type="text" name="projectnumber" value="{{ projectnumber or '' }}">
-    </label>
-    <button type="submit">Apply</button>
-    <a href="{{ url_for('main.po_list') }}">Clear</a>
+  <!-- Filters -->
+  <form method="get" class="filters" style="display:flex; gap:1rem; align-items:end; flex-wrap:wrap;">
+    <!-- Status -->
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status" onchange="this.form.submit()">
+        {% set status_opts = ['draft','issued','complete','cancelled'] %}
+        <option value="" {{ 'selected' if not selected_status else '' }}>All statuses</option>
+        {% for st in status_opts %}
+          <option value="{{ st }}"
+                  {{ 'selected' if (selected_status|string)==(st|string) else '' }}>
+            {{ st|capitalize }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Project (by projectnumber) -->
+    <div>
+      <label for="project">Project</label>
+      <select id="project" name="project" onchange="this.form.submit()">
+        <option value="" {{ 'selected' if not selected_project else '' }}>All projects</option>
+        {% for p in project_options %}
+          <option value="{{ p }}"
+                  {{ 'selected' if (selected_project|string)==(p|string) else '' }}>
+            {{ p }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Supplier (by supplier_name) -->
+    <div>
+      <label for="supplier">Supplier</label>
+      <select id="supplier" name="supplier" onchange="this.form.submit()">
+        <option value="" {{ 'selected' if not selected_supplier else '' }}>All suppliers</option>
+        {% for s in supplier_options %}
+          <option value="{{ s }}"
+                  {{ 'selected' if (selected_supplier|string)==(s|string) else '' }}>
+            {{ s }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Manual clear -->
+    <div>
+      <a class="btn btn-light" href="{{ url_for('main.po_list') }}">Reset</a>
+    </div>
   </form>
 
-<!-- This table uses a view 'active_po_list' created by/in supabase -->
+  <style>
+    table tr[data-href] { cursor: pointer; }
+    table tr[data-href]:hover { background: #f7f7f7; }
+    table tr[data-href]:focus { outline: 2px solid #4a90e2; outline-offset: -2px; }
+    .status-tag { padding: .15rem .4rem; border-radius: .4rem; font-size: .9em; }
+  </style>
 
+  <!-- active_po_list view -->
   <table>
     <thead>
       <tr>
@@ -24,21 +72,21 @@
         <th>Supplier</th>
         <th>Status</th>
         <th>Revision</th>
-        <th>Actions</th>
+        <th>Date</th>
       </tr>
     </thead>
     <tbody>
-      {% if not pos %}
-        <tr><td colspan="6" style="text-align:center; color:#888;">No purchase orders match your filter.</td></tr>
+      {% if not pos or pos|length == 0 %}
+        <tr><td colspan="6" style="text-align:center; color:#888;">No purchase orders match your filters.</td></tr>
       {% else %}
         {% for po in pos %}
           {% set po_id = po.id or po.purchase_order_id %}
           {% set pn = po.po_number %}
-          <tr>
+          {% set detail_url = url_for('main.po_preview', po_id=po_id) %}
+          <tr data-href="{{ detail_url }}" tabindex="0" aria-label="Open PO {{ pn }}">
             <td>
-              {# Safely zero-pad if numeric, else show raw #}
               {% if pn is not none and pn|string|trim != '' and (pn|string).isdigit() %}
-                {{ ("%06d"|format(pn|int)) }}
+                {{ "%06d"|format(pn|int) }}
               {% else %}
                 {{ pn or "" }}
               {% endif %}
@@ -51,11 +99,42 @@
             </td>
             <td>{{ po.current_revision or "" }}</td>
             <td>
-              <a class="btn btn-small" href="{{ url_for('main.po_preview', po_id=po_id) }}">View PO</a>
+              {# Format as dd/mm/yy, handling date/datetime or ISO string #}
+              {% set d = po.last_release %}
+              {% if d and (d.__class__.__name__ == 'datetime' or d.__class__.__name__ == 'date') %}
+                {{ d.strftime('%d/%m/%y') }}
+              {% else %}
+                {% set s = (d or '')|string %}
+                {% if s|length >= 10 and '-' in s %}
+                  {{ s[8:10] }}/{{ s[5:7] }}/{{ s[2:4] }}
+                {% else %}
+                  {{ s }}
+                {% endif %}
+              {% endif %}
             </td>
           </tr>
         {% endfor %}
       {% endif %}
     </tbody>
   </table>
+
+  <script>
+    (function () {
+      const rows = document.querySelectorAll('tr[data-href]');
+      rows.forEach(row => {
+        const href = row.getAttribute('data-href');
+        if (!href) return;
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('a, button')) return;
+          window.location.href = href;
+        });
+        row.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            window.location.href = href;
+          }
+        });
+      });
+    })();
+  </script>
 {% endblock %}

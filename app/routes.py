@@ -34,6 +34,8 @@ import base64, uuid, requests
 from pathlib import Path
 from app.integrations.outlook_graph import create_draft_with_attachment
 from app.services.po_email import try_create_po_draft
+from zoneinfo import ZoneInfo
+import re
 
 main = Blueprint("main", __name__)
 
@@ -75,15 +77,23 @@ def index():
 def home_redirect():
     return redirect(url_for("main.index"))
 
+# app/blueprints/main.py (or wherever po_list lives)
+from flask import request, render_template, flash
+from app.supabase_client import (
+    fetch_active_pos_from_view,  # extend this helper as shown below
+    fetch_projects,              # already used by Accounts
+    fetch_suppliers,             # already used by Accounts
+)
+
 @main.route("/po-list")
 def po_list():
+    from flask import request, render_template, flash
 
-    projectnumber = request.args.get("projectnumber")
+    # Existing date + sorting params (kept)
     date_from = request.args.get("from")
     date_to   = request.args.get("to")
-
-    sort = request.args.get("sort", "po_number")
-    dir_ = request.args.get("dir", "desc").lower()
+    sort      = request.args.get("sort", "po_number")
+    dir_      = (request.args.get("dir", "desc") or "desc").lower()
 
     allowed_sorts = {"po_number", "updated_at"}
     if sort not in allowed_sorts:
@@ -91,27 +101,56 @@ def po_list():
     dir_ = "asc" if dir_ == "asc" else "desc"
     order_by = f"{sort}.{dir_}"
 
+    # Filters
+    selected_status   = (request.args.get("status", "") or "").strip().lower()
+    selected_project  = (request.args.get("project", "") or "").strip()
+    selected_supplier = (request.args.get("supplier", "") or "").strip()
+
     try:
+        # Hydrate dropdowns
+        projects_rows = fetch_projects() or []   # [{projectnumber, projectdescription}, ...]
+        project_options = sorted({
+            (row.get("projectnumber") or "").strip()
+            for row in projects_rows
+            if row and row.get("projectnumber")
+        })
+
+        supplier_options = sorted({
+            (s or "").strip()
+            for s in (fetch_suppliers() or [])   # fetch_suppliers already returns list[str]
+            if s
+        })
+
+        # Fetch the list with filters applied server-side
         pos = fetch_active_pos_from_view(
-            projectnumber=projectnumber,
+            projectnumber=selected_project or None,
+            supplier_name=selected_supplier or None,
+            status=selected_status or None,
             date_from=date_from,
             date_to=date_to,
             order_by=order_by,
-        )
+        ) or []
 
     except Exception as e:
         flash(f"Failed to load POs: {e}", "danger")
         pos = []
+        project_options, supplier_options = [], []
 
     return render_template(
         "po_list.html",
         pos=pos,
-        projectnumber=projectnumber,
         date_from=date_from,
         date_to=date_to,
         sort=sort,
         dir=dir_,
+        selected_status=selected_status,
+        selected_project=selected_project,
+        selected_supplier=selected_supplier,
+        project_options=project_options,
+        supplier_options=supplier_options,
     )
+
+
 
 
 @main.route("/po/<po_id>")
@@ -935,11 +974,10 @@ def advance_revision(po_id):
         flash("Failed to bump revision.", "error")
         return redirect(url_for("main.edit_po", po_id=po_id))
 
+
 @main.route("/spend-report")
 def spend_report():
-    from zoneinfo import ZoneInfo
-    from datetime import datetime
-    import re
+
 
     # ---- Rolling 12 months (chronological; current month last) ----
     tz = ZoneInfo("Europe/London")
