@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response, jsonify, current_app
 from app.supabase_client import (
     fetch_suppliers, 
+    suppliers_as_objects,
     fetch_delivery_addresses,
     fetch_po_detail,
     fetch_projects, 
@@ -78,12 +79,12 @@ def home_redirect():
     return redirect(url_for("main.index"))
 
 # app/blueprints/main.py (or wherever po_list lives)
-from flask import request, render_template, flash
-from app.supabase_client import (
-    fetch_active_pos_from_view,  # extend this helper as shown below
-    fetch_projects,              # already used by Accounts
-    fetch_suppliers,             # already used by Accounts
-)
+# from flask import request, render_template, flash
+# from app.supabase_client import (
+#     fetch_active_pos_from_view,  # extend this helper as shown below
+#     fetch_projects,              # already used by Accounts
+#     fetch_suppliers,             # already used by Accounts
+# )
 
 @main.route("/po-list")
 def po_list():
@@ -262,7 +263,8 @@ def create_po():
 
     # -------- GET: render create form --------
 
-    suppliers = fetch_suppliers()
+    suppliers = suppliers_as_objects()
+    suppliers_map = {s["id"]: s["name"] for s in suppliers}
 
     # Pull *directly* from project_register_items
     base, _ = _get_supabase_auth()
@@ -312,6 +314,7 @@ def create_po():
         form_action=url_for("main.create_po"),
         po_data={},
         suppliers=suppliers,
+        suppliers_map=suppliers_map,
         project_items=project_items,
         delivery_addresses=delivery_addresses,
         delivery_contacts=delivery_contacts,
@@ -607,7 +610,8 @@ def edit_po(po_id):
         return render_template("404.html"), 404
 
     po_metadata = _active_po_metadata(po)
-    suppliers = fetch_suppliers()
+    suppliers = suppliers_as_objects()
+    suppliers_map = {s["id"]: s["name"] for s in suppliers}
 
     delivery_contact = po.get("delivery_contact")
     delivery_address = po.get("delivery_address")
@@ -725,6 +729,7 @@ def edit_po(po_id):
         statuses=statuses_forward,
         project_items=project_items,
         suppliers=suppliers,
+        suppliers_map=suppliers_map,
         delivery_contacts=fetch_delivery_contacts(),
         delivery_addresses=fetch_delivery_addresses(),
         idempotency_key=idempotency_key,

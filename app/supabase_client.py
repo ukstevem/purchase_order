@@ -123,6 +123,8 @@ def _is_uuid(val):
     except Exception:
         return False
 
+
+
 # ------------------------------
 # Fetchers
 # ------------------------------
@@ -212,7 +214,45 @@ def fetch_suppliers(limit: int = 10000):
         if r.get("name")
     }
     return sorted(names)
+    
+# routes.py
+def suppliers_as_objects():
+    """
+    Normalize suppliers to [{'id': ..., 'name': ...}, ...] using the current
+    fetch_suppliers() output (which may be list[str] or list[dict]).
+    """
+    rows = fetch_suppliers() or []
+    # Already correct?
+    if rows and isinstance(rows[0], dict) and "id" in rows[0] and "name" in rows[0]:
+        # Sort for nice UX
+        return sorted(rows, key=lambda s: (s.get("name") or "").lower())
 
+    # Otherwise rows is likely list[str] of names – hydrate ids from Supabase.
+    base, _ = _get_supabase_auth()
+    hdr = get_headers(False)
+    import requests
+
+    try:
+        r = requests.get(
+            f"{base}/rest/v1/suppliers",
+            headers=hdr,
+            params={"select": "id,name", "order": "name.asc", "limit": 10000},
+            timeout=30,
+        )
+        r.raise_for_status()
+        all_sup = r.json() or []
+    except Exception:
+        all_sup = []
+
+    name_to_id = { (s.get("name") or "").strip(): s.get("id") for s in all_sup }
+    # Build normalized objects; id may be None if a name isn’t found.
+    out = []
+    for n in rows:
+        if not n: 
+            continue
+        n_clean = str(n).strip()
+        out.append({"id": name_to_id.get(n_clean), "name": n_clean})
+    return out
 
 # ---- OPTIONAL: Suppliers from the active view (if you prefer only names that appear in POs) ----
 def fetch_suppliers_from_view(limit: int = 10000):
