@@ -151,9 +151,6 @@ def po_list():
         supplier_options=supplier_options,
     )
 
-
-
-
 @main.route("/po/<po_id>")
 def po_preview(po_id):
     from .supabase_client import fetch_po_detail
@@ -325,6 +322,7 @@ def create_po():
 def edit_po(po_id):
     import uuid
     import requests
+    from datetime import datetime
     from flask import session, render_template, request, redirect, url_for, flash, current_app
 
     def _to_int(val):
@@ -332,6 +330,27 @@ def edit_po(po_id):
             return int(str(val).strip())
         except Exception:
             return None
+
+    # ---- Revision helpers (DRIVER for last_released) ----
+    def _rev_to_int(s):
+        try:
+            s = (s or "").strip()
+            return int(s)
+        except Exception:
+            return None
+
+    def _should_stamp_release(prev_rev: str, new_rev: str) -> bool:
+        """
+        Stamp when alpha→numeric OR numeric increases.
+        Examples:
+          'b' -> '1'  => True
+          '1' -> '2'  => True
+          '2' -> '2'  => False
+          'c' -> 'd'  => False (both alpha)
+        """
+        prev_num = _rev_to_int(prev_rev)
+        new_num  = _rev_to_int(new_rev)
+        return (new_num is not None) and (prev_num is None or new_num > prev_num)
 
     # ---- PATCH helpers (kept for the post-release optional-no-bump path) ----
     def _patch_po(po_id: str, fields: dict):
@@ -451,10 +470,13 @@ def edit_po(po_id):
                 return redirect(url_for("main.index"))
 
             current_status = (po.get("status") or "draft").lower()
-            current_rev    = po.get("current_revision", "a")
+            current_rev    = str(po.get("current_revision", "a")).strip()
             if current_status in {"complete", "cancelled"}:
                 flash("❌ This PO is marked as complete or cancelled and cannot be edited.", "warning")
                 return redirect(url_for("main.po_preview", po_id=po_id))
+
+            # timestamp used when stamping
+            release_ts = datetime.utcnow().isoformat() + "Z"
 
             # 2) Form & status
             new_status = (request.form.get("status") or po["status"]).lower()
@@ -517,7 +539,7 @@ def edit_po(po_id):
             metadata["manual_delivery_address"] = None
 
             # 3) Bump rules
-            # ALWAYS bump when current is draft (your new requirement)
+            # ALWAYS bump when current is draft (your requirement)
             always_bump = (current_status == "draft")
 
             # after release, optional bump only for approved/issued
@@ -543,6 +565,13 @@ def edit_po(po_id):
                 metadata["manual_delivery_address"] = None
                 metadata["item_seq"]                = metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq"))
 
+                # --- REVISION-DRIVEN last_released logic ---
+                if _should_stamp_release(current_rev, target_rev):
+                    metadata["last_released"] = release_ts
+                else:
+                    if po.get("last_released"):
+                        metadata["last_released"] = po["last_released"]
+
                 new_po_id = insert_po_bundle(metadata)
                 for item in line_items:
                     item["po_id"] = new_po_id
@@ -556,14 +585,20 @@ def edit_po(po_id):
 
             # If user chose not to bump and it's allowed (approved/issued), do PATCH
             if bump_allowed_after_release and not bump_flag:
+                target_rev = current_rev  # PATCH path keeps same revision today
                 po_fields = {
                     "project_id":        metadata.get("project_id") or po.get("project_id"),
                     "supplier_id":       po["supplier_id"],
                     "po_number":         po["po_number"],
                     "status":            new_status,
-                    "current_revision":  current_rev,
+                    "current_revision":  target_rev,
                     "item_seq":          metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq")),
                 }
+
+                # If (ever) PATCH changes the revision to a higher numeric, stamp now (defensive, future-proof)
+                if _should_stamp_release(current_rev, target_rev):
+                    po_fields["last_released"] = release_ts
+
                 md_fields = {k: v for k, v in metadata.items()
                              if k not in {"project_id","supplier_id","po_number","status","current_revision","item_seq","idempotency_key"}}
 
@@ -589,6 +624,13 @@ def edit_po(po_id):
             metadata["delivery_address_id"]     = delivery_address_id
             metadata["manual_delivery_address"] = None
             metadata["item_seq"]                = metadata.get("item_seq") if metadata.get("item_seq") is not None else _to_int(po.get("item_seq"))
+
+            # --- REVISION-DRIVEN last_released logic ---
+            if _should_stamp_release(current_rev, target_rev):
+                metadata["last_released"] = release_ts
+            else:
+                if po.get("last_released"):
+                    metadata["last_released"] = po["last_released"]
 
             new_po_id = insert_po_bundle(metadata)
             for item in line_items:
