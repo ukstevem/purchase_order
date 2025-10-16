@@ -555,7 +555,7 @@ def fetch_active_pos_from_view(projectnumber=None, supplier_name=None, status=No
     filters = []
 
     if projectnumber:
-        filters.append(f"projectnumber.ilike.%{projectnumber}%")
+        filters.append(f"project_id.ilike.%{projectnumber}%")
     if supplier_name:
         params["supplier_name"] = f"eq.{supplier_name}"
     if status:
