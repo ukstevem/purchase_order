@@ -685,19 +685,14 @@ def _extract_manual_delivery_contact(data: dict) -> dict | None:
 # ------------------------------
 
 def insert_po_bundle(data):
-    """
-    Inserts a new PO record and its associated metadata.
-    - If delivery_contact_id not provided but manual_contact_* present, create a delivery_contacts row and link it.
-    Returns the new PO UUID.
-    """
     status    = data.get("status", "draft")
     revision  = data.get("current_revision", "a")
     po_number = data.get("po_number")
 
-    # Create contact from manual fields if needed
+    # Resolve delivery_contact_id: prefer existing, else build from manual_* if address present
     delivery_contact_id = data.get("delivery_contact_id") or None
     if not delivery_contact_id:
-        manual = _extract_manual_delivery_contact(data)  # assumes you already have this util
+        manual = _extract_manual_delivery_contact(data)
         if manual and manual.get("address_id"):
             try:
                 delivery_contact_id = insert_delivery_contact(manual)
@@ -706,32 +701,28 @@ def insert_po_bundle(data):
         else:
             current_app.logger.info("ℹ️ Skipping delivery_contacts insert (no manual or missing address_id).")
 
-    # ---- Step 1: purchase_orders (request only the id back) ----
+    # ---- Step 1: purchase_orders (only request id back) ----
     po_payload = {
-        "project_id": data["project_id"],
-        "item_seq": data["item_seq"],
-        "supplier_id": data.get("supplier_id") or None,
-        "status": status,
-        "current_revision": revision,
+        "project_id":          data["project_id"],
+        "item_seq":            data["item_seq"],
+        "supplier_id":         data.get("supplier_id") or None,
+        "status":              status,
+        "current_revision":    revision,
         "delivery_contact_id": delivery_contact_id or None,
+        "po_number":           po_number if po_number else None,
+        "last_release":        data.get("last_release") or None,
     }
-    if po_number:
-        po_payload["po_number"] = po_number
 
-    if "last_release" in data and data.get("last_release"):
-        po_payload["last_release"] = data["last_release"]
-
-    if "delivery_address_id" in data:
-        po_payload["delivery_address_id"] = data.get("delivery_address_id")
+    # 🚧 IMPORTANT: do NOT let legacy keys leak into purchase_orders
+    allowed = {
+        "project_id","item_seq","supplier_id","status","current_revision",
+        "delivery_contact_id","po_number","last_release"
+    }
+    po_payload = {k: v for k, v in po_payload.items() if v is not None and k in allowed}
 
     base, _ = _get_supabase_auth()
-    po_url = f"{base}/rest/v1/purchase_orders?select=id"          # <-- only return id
-    po_resp = requests.post(
-        po_url,
-        headers=get_headers(),
-        json=po_payload,
-        timeout=30
-    )
+    po_url = f"{base}/rest/v1/purchase_orders?select=id"
+    po_resp = requests.post(po_url, headers=get_headers(), json=po_payload, timeout=30)
 
     if po_resp.status_code >= 400:
         try:
@@ -741,27 +732,21 @@ def insert_po_bundle(data):
         current_app.logger.error("❌ purchase_orders insert failed %s: %s | payload=%s",
                                  po_resp.status_code, err, po_payload)
     po_resp.raise_for_status()
-
     po_id = po_resp.json()[0]["id"]
 
     # ---- Step 2: po_metadata ----
     meta_payload = {
-        "po_id": po_id,
-        "delivery_terms": data.get("delivery_terms", ""),
-        "delivery_date": data.get("delivery_date"),  # allow null
-        "supplier_contact_name": data.get("supplier_contact_name", ""),
-        "supplier_reference_number": data.get("supplier_reference_number", ""),
+        "po_id":                      po_id,
+        "delivery_terms":             data.get("delivery_terms", ""),
+        "delivery_date":              data.get("delivery_date"),
+        "supplier_contact_name":      data.get("supplier_contact_name", ""),
+        "supplier_reference_number":  data.get("supplier_reference_number", ""),
         "test_certificates_required": bool(data.get("test_certificates_required", False)),
-        "active": True,
+        "active":                     True,
     }
 
     meta_url = f"{base}/rest/v1/po_metadata"
-    meta_resp = requests.post(
-        meta_url,
-        headers=get_headers(),
-        json=meta_payload,
-        timeout=30
-    )
+    meta_resp = requests.post(meta_url, headers=get_headers(), json=meta_payload, timeout=30)
     if meta_resp.status_code >= 400:
         try:
             err = meta_resp.json()
@@ -772,7 +757,6 @@ def insert_po_bundle(data):
     meta_resp.raise_for_status()
 
     return po_id
-
 
 def insert_line_items(items):
     if not items:
