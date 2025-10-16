@@ -19,7 +19,7 @@
         {% for row in summary %}
             <tr>
             <td>
-                <a href="{{ url_for('main.po_list') }}?projectnumber={{ row.projectnumber|urlencode }}">
+                <a href="{{ url_for('main.po_list') }}?project={{ row.project_id|urlencode }}">
                 {{ row.project }}
                 </a>
             </td>

@@ -708,15 +708,21 @@ def insert_po_bundle(data):
 
     # ---- Step 1: purchase_orders (request only the id back) ----
     po_payload = {
-        "project_id": data["project_id"],                         # TEXT (project number)
+        "project_id": data["project_id"],
         "item_seq": data["item_seq"],
-        "supplier_id": data["supplier_id"] or None,               # UUID or None (not "")
+        "supplier_id": data.get("supplier_id") or None,
         "status": status,
         "current_revision": revision,
-        "delivery_contact_id": delivery_contact_id or None,       # UUID or None
+        "delivery_contact_id": delivery_contact_id or None,
     }
     if po_number:
         po_payload["po_number"] = po_number
+
+    if "last_release" in data and data.get("last_release"):
+        po_payload["last_release"] = data["last_release"]
+
+    if "delivery_address_id" in data:
+        po_payload["delivery_address_id"] = data.get("delivery_address_id")
 
     base, _ = _get_supabase_auth()
     po_url = f"{base}/rest/v1/purchase_orders?select=id"          # <-- only return id
@@ -994,7 +1000,7 @@ def fetch_project_po_summary():
     """
     base, _ = _get_supabase_auth()
     url = f"{base}/rest/v1/active_po_list"
-    params = {"select": "projectnumber,status"}
+    params = {"select": "project_id,status"}
     resp = requests.get(url, headers=get_headers(False), params=params, timeout=30)
 
     if resp.status_code >= 400:
@@ -1006,13 +1012,13 @@ def fetch_project_po_summary():
     resp.raise_for_status()
 
     rows = resp.json() or []
-    agg = defaultdict(lambda: {"project": "", "projectnumber": "", "draft": 0, "active": 0})
+    agg = defaultdict(lambda: {"project": "", "project_id": "", "draft": 0, "active": 0})
 
     for r in rows:
-        projectnumber = (r.get("projectnumber") or "—").strip()
+        projectnumber = (r.get("project_id") or "—").strip()
         if not agg[projectnumber]["project"]:
             agg[projectnumber]["project"] = projectnumber
-            agg[projectnumber]["projectnumber"] = projectnumber
+            agg[projectnumber]["project_id"] = projectnumber
 
         status = (r.get("status") or "").lower()
         if status == "draft":
@@ -1020,7 +1026,7 @@ def fetch_project_po_summary():
         else:
             agg[projectnumber]["active"] += 1
 
-    return sorted(agg.values(), key=lambda x: x["projectnumber"])
+    return sorted(agg.values(), key=lambda x: x["project_id"])
 
 
 # ------------------------------

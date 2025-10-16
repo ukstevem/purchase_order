@@ -567,10 +567,10 @@ def edit_po(po_id):
 
                 # --- REVISION-DRIVEN last_released logic ---
                 if _should_stamp_release(current_rev, target_rev):
-                    metadata["last_released"] = release_ts
+                    metadata["last_release"] = release_ts
                 else:
-                    if po.get("last_released"):
-                        metadata["last_released"] = po["last_released"]
+                    if po.get("last_release"):
+                        metadata["last_release"] = po["last_release"]
 
                 new_po_id = insert_po_bundle(metadata)
                 for item in line_items:
@@ -597,7 +597,7 @@ def edit_po(po_id):
 
                 # If (ever) PATCH changes the revision to a higher numeric, stamp now (defensive, future-proof)
                 if _should_stamp_release(current_rev, target_rev):
-                    po_fields["last_released"] = release_ts
+                    po_fields["last_release"] = release_ts
 
                 md_fields = {k: v for k, v in metadata.items()
                              if k not in {"project_id","supplier_id","po_number","status","current_revision","item_seq","idempotency_key"}}
@@ -627,10 +627,10 @@ def edit_po(po_id):
 
             # --- REVISION-DRIVEN last_released logic ---
             if _should_stamp_release(current_rev, target_rev):
-                metadata["last_released"] = release_ts
+                metadata["last_release"] = release_ts
             else:
-                if po.get("last_released"):
-                    metadata["last_released"] = po["last_released"]
+                if po.get("last_release"):
+                    metadata["last_release"] = po["last_release"]
 
             new_po_id = insert_po_bundle(metadata)
             for item in line_items:
