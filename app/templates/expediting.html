@@ -1,0 +1,806 @@
+{# templates/expediting.html #}
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Expediting</h1>
+
+<style>
+  /* Small tweaks specific to this page */
+  .expediting-summary {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: #555;
+  }
+
+  table.po-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  table.po-table th,
+  table.po-table td {
+    padding: 0.35rem 0.6rem;
+    border-bottom: 1px solid #ddd;
+  }
+
+  table.po-table tbody tr.po-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  table.po-table tbody tr.po-row:hover {
+    background-color: #f5f5f5;
+  }
+
+  table.po-table tbody tr.po-row.expanded {
+    background-color: #eef8ff;
+  }
+
+  .status-tag {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    text-transform: capitalize;
+    min-width: 4.5rem;
+    text-align: center;
+  }
+
+  /* Delivery flag colours */
+  .delivery-flag-unknown {
+    background: #e2e3e5;
+    color: #41464b;
+  }
+
+  .delivery-flag-complete {
+    background: #d1e7dd;
+    color: #0f5132;
+  }
+
+  .delivery-flag-late {
+    background: #f8d7da;
+    color: #842029;
+  }
+
+  .delivery-flag-partial {
+    background: #fff3cd;
+    color: #664d03;
+  }
+
+  .line-items-container {
+    padding: 0.5rem 0.25rem 0.75rem 0.25rem;
+    background-color: #fafafa;
+  }
+
+  .line-items-loading {
+    font-size: 0.85rem;
+    color: #777;
+    margin-bottom: 0.25rem;
+  }
+
+  table.line-items-table {
+    width: auto;
+    margin: 0 auto; /* center subtable */
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    text-align: center; /* center most columns */
+  }
+
+  table.line-items-table th,
+  table.line-items-table td {
+    padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid #e1e1e1;
+  }
+
+  table.line-items-table th {
+    background: #f0f4f7;
+  }
+
+  .description-cell {
+    text-align: left; /* description stays left for readability */
+  }
+
+  .number-cell {
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .line-items-table input[type="number"],
+  .line-items-table input[type="date"] {
+    font-size: 0.85rem;
+    padding: 0.05rem 0.2rem;
+  }
+
+  /* Hide the built-in "dd/mm/yyyy" text until focused or value present */
+  .line-items-table input[type="date"].date-no-placeholder::-webkit-datetime-edit {
+    color: transparent;
+  }
+
+  .line-items-table input[type="date"].date-no-placeholder.has-value::-webkit-datetime-edit,
+  .line-items-table input[type="date"].date-no-placeholder:focus::-webkit-datetime-edit {
+    color: inherit;
+  }
+
+  /* Row colouring for line items */
+  .line-row-complete {
+    background-color: #d1e7dd; /* green-ish */
+    color: #0f5132;
+  }
+
+  .line-row-late {
+    background-color: #f8d7da; /* red-ish */
+    color: #842029;
+  }
+
+  /* Pagination */
+  .pagination-nav {
+    margin-top: 0.75rem;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .pagination {
+    list-style: none;
+    display: flex;
+    gap: 0.25rem;
+    padding: 0;
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  .pagination-item {
+    display: inline-block;
+  }
+
+  .pagination-link,
+  .pagination-link:visited {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    text-decoration: none;
+    color: #333;
+  }
+
+  .pagination-item.active .pagination-link {
+    background-color: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+    cursor: default;
+  }
+
+  .pagination-item.disabled .pagination-link {
+    color: #aaa;
+    border-color: #ddd;
+    cursor: default;
+    pointer-events: none;
+  }
+</style>
+
+{% if po_list and po_list|length > 0 %}
+  <div class="expediting-summary">
+    Showing
+    {% if start_index and end_index %}
+      {{ start_index }}–{{ end_index }}
+    {% else %}
+      0
+    {% endif %}
+    of {{ total_pos }} purchase orders
+    (sorted by PO number {{ dir|upper }}).
+  </div>
+
+  <table class="po-table">
+    <thead>
+      <tr>
+        <th>PO Number</th>
+        <th>Project</th>
+        <th>Supplier</th>
+        <th>Status</th>
+        <th>Revision</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for po in po_list %}
+        {% set po_id = po.id or po.purchase_order_id %}
+        {% set pn = po.po_number %}
+        {% set detail_url = url_for('main.po_preview', po_id=po_id) %}
+        <tr
+          class="po-row"
+          data-po-id="{{ po_id }}"
+          data-line-items-url="{{ url_for('expediting.expediting_line_items', po_id=po_id) }}"
+        >
+          <td>
+            {% if pn is not none and pn|string|trim != '' and (pn|string).isdigit() %}
+              {{ "%06d"|format(pn|int) }}
+            {% else %}
+              {{ pn or "" }}
+            {% endif %}
+          </td>
+          <td>{{ po.projectnumber or po.project_id or "" }}</td>
+          <td>{{ po.supplier_name or "" }}</td>
+          <td>
+            {# Delivery status flag; JS will update colour & text based on line items #}
+            <span
+              class="status-tag delivery-flag delivery-flag-unknown"
+              data-delivery-status="unknown"
+            >
+              Checking…
+            </span>
+          </td>
+          <td>{{ po.current_revision or "" }}</td>
+          <td>
+            {# Prefer last_release; fallback to updated_at or created #}
+            {% set d = po.last_release or po.updated_at or po.created %}
+            {% if d and (d.__class__.__name__ == 'datetime' or d.__class__.__name__ == 'date') %}
+              {{ d.strftime('%d/%m/%y') }}
+            {% else %}
+              {% set s = (d or '')|string %}
+              {% if s|length >= 10 and '-' in s %}
+                {{ s[8:10] }}/{{ s[5:7] }}/{{ s[2:4] }}
+              {% else %}
+                {{ s }}
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+
+        {# Hidden line-items row; revealed when the PO row is clicked #}
+        <tr class="po-line-items-row" data-parent-po-id="{{ po_id }}" style="display: none;">
+          <td colspan="6">
+            <div class="line-items-container">
+              <div class="line-items-loading">Loading line items…</div>
+              <table class="line-items-table" aria-label="Line items for PO {{ pn }}">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Received</th>
+                    <th>Expected</th>
+                    <th>Completed</th>
+                  </tr>
+                </thead>
+                <tbody data-loaded="0">
+                  {# Filled by JavaScript after fetch #}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {# Pagination controls #}
+  {% if total_pages > 1 %}
+    {% set start = page_start or 1 %}
+    {% set end = page_end or total_pages %}
+    <nav class="pagination-nav" aria-label="Expediting pagination">
+      <ul class="pagination">
+        {# Prev #}
+        <li class="pagination-item {% if page <= 1 %}disabled{% endif %}">
+          {% if page <= 1 %}
+            <span class="pagination-link">‹ Prev</span>
+          {% else %}
+            <a
+              class="pagination-link"
+              href="{{ url_for(
+                    'expediting.expediting',
+                    page=page-1,
+                    sort=sort,
+                    dir=dir,
+                    status=selected_status,
+                    project=selected_project,
+                    supplier=selected_supplier
+                 ) }}"
+            >‹ Prev</a>
+          {% endif %}
+        </li>
+
+        {# Page numbers (limited window) #}
+        {% for p in range(start, end + 1) %}
+          <li class="pagination-item {% if p == page %}active{% endif %}">
+            {% if p == page %}
+              <span class="pagination-link">{{ p }}</span>
+            {% else %}
+              <a
+                class="pagination-link"
+                href="{{ url_for(
+                      'expediting.expediting',
+                      page=p,
+                      sort=sort,
+                      dir=dir,
+                      status=selected_status,
+                      project=selected_project,
+                      supplier=selected_supplier
+                   ) }}"
+              >{{ p }}</a>
+            {% endif %}
+          </li>
+        {% endfor %}
+
+        {# Next #}
+        <li class="pagination-item {% if page >= total_pages %}disabled{% endif %}">
+          {% if page >= total_pages %}
+            <span class="pagination-link">Next ›</span>
+          {% else %}
+            <a
+              class="pagination-link"
+              href="{{ url_for(
+                    'expediting.expediting',
+                    page=page+1,
+                    sort=sort,
+                    dir=dir,
+                    status=selected_status,
+                    project=selected_project,
+                    supplier=selected_supplier
+                 ) }}"
+            >Next ›</a>
+          {% endif %}
+        </li>
+      </ul>
+    </nav>
+  {% endif %}
+
+{% else %}
+  <p>No purchase orders found.</p>
+{% endif %}
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const table = document.querySelector(".po-table");
+    if (!table) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Cache for pre-fetched line items per PO (for status + first expand)
+    const lineItemsCache = Object.create(null);
+
+    // Helper: convert raw date value to yyyy-mm-dd for <input type="date">
+    function toDateInputValue(raw) {
+      if (!raw) return "";
+      const s = String(raw);
+      if (s.length >= 10) {
+        return s.slice(0, 10); // works for 'YYYY-MM-DD...' and ISO strings
+      }
+      return "";
+    }
+
+    function parseDate(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return null;
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    // Set the delivery flag for a PO row
+    function setPoDeliveryStatus(poId, status) {
+      const row = table.querySelector('tr.po-row[data-po-id="' + poId + '"]');
+      if (!row) return;
+      const badge = row.querySelector(".delivery-flag");
+      if (!badge) return;
+
+      badge.classList.remove(
+        "delivery-flag-unknown",
+        "delivery-flag-complete",
+        "delivery-flag-late",
+        "delivery-flag-partial"
+      );
+
+      let text = "";
+      if (status === "late") {
+        badge.classList.add("delivery-flag-late");
+        badge.dataset.deliveryStatus = "late";
+        text = "Late";
+      } else if (status === "complete") {
+        badge.classList.add("delivery-flag-complete");
+        badge.dataset.deliveryStatus = "complete";
+        text = "Complete";
+      } else if (status === "partial") {
+        badge.classList.add("delivery-flag-partial");
+        badge.dataset.deliveryStatus = "partial";
+        text = "In progress";
+      } else {
+        badge.classList.add("delivery-flag-unknown");
+        badge.dataset.deliveryStatus = "unknown";
+        text = "—";
+      }
+      badge.textContent = text;
+    }
+
+    // Compute status from raw items (JSON from server)
+    function computeStatusFromItems(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        return "unknown";
+      }
+
+      let anyLate = false;
+      let allComplete = true;
+
+      items.forEach(function (item) {
+        const qty = Number(item.quantity || 0);
+        const received = Number(item.qty_received || 0);
+
+        const expStr = item.exped_expected_date
+          ? String(item.exped_expected_date).slice(0, 10)
+          : null;
+        const expectedDate = expStr ? parseDate(expStr) : null;
+
+        const isComplete = qty > 0 && received >= qty;
+        if (!isComplete) {
+          allComplete = false;
+        }
+
+        if (!isComplete && expectedDate && expectedDate < today) {
+          anyLate = true;
+        }
+      });
+
+      if (anyLate) return "late";
+      if (allComplete) return "complete";
+      return "partial";
+    }
+
+    // Compute status from the DOM (line-items subtable)
+    function computeStatusFromDom(detailRow) {
+      const rows = detailRow.querySelectorAll("tbody tr");
+      if (!rows.length) return "unknown";
+
+      let anyLate = false;
+      let allComplete = true;
+
+      rows.forEach(function (tr) {
+        const receivedInput = tr.querySelector(".line-received-input");
+        const expectedInput = tr.querySelector(".line-expected-input");
+        if (!receivedInput) return;
+
+        const qty = parseFloat(receivedInput.dataset.qty || "0");
+        let received = parseFloat(receivedInput.value || "0");
+        if (!Number.isFinite(received)) received = 0;
+
+        const expectedDate = expectedInput ? parseDate(expectedInput.value) : null;
+
+        const isComplete = Number.isFinite(qty) && qty > 0 && received >= qty;
+        if (!isComplete) {
+          allComplete = false;
+        }
+        if (!isComplete && expectedDate && expectedDate < today) {
+          anyLate = true;
+        }
+      });
+
+      if (anyLate) return "late";
+      if (allComplete) return "complete";
+      return "partial";
+    }
+
+    function updatePoStatusFromDom(detailRow) {
+      const poId = detailRow.getAttribute("data-parent-po-id");
+      if (!poId) return;
+      const status = computeStatusFromDom(detailRow);
+      setPoDeliveryStatus(poId, status);
+    }
+
+    // Send PATCH to update a single line item in Supabase
+    function patchLineItem(row, payload) {
+      const itemId = row.getAttribute("data-item-id");
+      if (!itemId) return;
+
+      fetch("/expediting/line-items/" + encodeURIComponent(itemId), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload || {}),
+      })
+        .then(function (resp) {
+          return resp.json().catch(function () {
+            return null;
+          });
+        })
+        .then(function (data) {
+          if (!data) return;
+          if (data.ok === false || data.error) {
+            console.error("Line item update error", data);
+          }
+        })
+        .catch(function (err) {
+          console.error("Network error updating line item", err);
+        });
+    }
+
+    // Apply colour coding to a line-item row
+    function updateRowStatus(tr) {
+      if (!tr) return;
+
+      tr.classList.remove("line-row-complete", "line-row-late");
+
+      const receivedInput = tr.querySelector(".line-received-input");
+      const expectedInput = tr.querySelector(".line-expected-input");
+      const completedInput = tr.querySelector(".line-completed-input");
+
+      if (!receivedInput) return;
+
+      const qty = parseFloat(receivedInput.dataset.qty || "0");
+      let received = parseFloat(receivedInput.value || "0");
+      if (!Number.isFinite(received)) received = 0;
+
+      const expectedDate = expectedInput ? parseDate(expectedInput.value) : null;
+
+      // "Complete" rule: received == qty (and qty > 0)
+      const isComplete =
+        Number.isFinite(qty) && qty > 0 && received >= qty;
+
+      // "Late" rule: today > expected date AND not complete
+      let isLate = false;
+      if (!isComplete && expectedDate) {
+        isLate = expectedDate < today;
+      }
+
+      if (isComplete) {
+        tr.classList.add("line-row-complete");
+      } else if (isLate) {
+        tr.classList.add("line-row-late");
+      }
+    }
+
+    // Build subtable rows from items JSON
+    function buildRowsFromItems(tbody, items) {
+      tbody.innerHTML = "";
+      if (!Array.isArray(items) || items.length === 0) {
+        var tr = document.createElement("tr");
+        var td = document.createElement("td");
+        td.colSpan = 6;
+        td.textContent = "No line items found.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      items.forEach(function (item, index) {
+        var tr = document.createElement("tr");
+
+        function safe(v) {
+          return v === null || v === undefined ? "" : v;
+        }
+
+        var itemId = item.id || "";
+        tr.setAttribute("data-item-id", itemId);
+
+        var qty = Number(item.quantity || 0);
+        var received = Number(item.qty_received || 0);
+        if (!Number.isFinite(qty)) qty = 0;
+        if (!Number.isFinite(received)) received = 0;
+
+        var expDue = toDateInputValue(item.exped_expected_date);
+        var expDone = toDateInputValue(item.exped_completed_date);
+
+        var expectedClasses = "line-expected-input date-no-placeholder";
+        if (expDue) {
+          expectedClasses += " has-value";
+        }
+
+        var completedClasses = "line-completed-input date-no-placeholder";
+        if (expDone) {
+          completedClasses += " has-value";
+        }
+
+        tr.innerHTML =
+          "<td>" + (index + 1) + "</td>" +
+          '<td class="description-cell">' + safe(item.description) + "</td>" +
+          '<td class="number-cell">' + (qty || "") + "</td>" +
+          '<td class="number-cell">' +
+            '<input type="number" ' +
+              'class="line-received-input" ' +
+              'min="0" ' +
+              'max="' + qty + '" ' +
+              'data-qty="' + qty + '" ' +
+              'value="' + received + '" ' +
+              'style="width:4rem; text-align:center;" ' +
+            '/>' +
+          "</td>" +
+          "<td>" +
+            '<input type="date" ' +
+              'class="' + expectedClasses + '" ' +
+              'value="' + expDue + '" ' +
+            "/>" +
+          "</td>" +
+          "<td>" +
+            '<input type="date" ' +
+              'class="' + completedClasses + '" ' +
+              'value="' + expDone + '" ' +
+            "/>" +
+          "</td>";
+
+        tbody.appendChild(tr);
+        updateRowStatus(tr);  // apply initial colour
+      });
+    }
+
+    // Click on PO row: expand / collapse its line-items row
+    table.addEventListener("click", function (evt) {
+      const row = evt.target.closest("tr.po-row");
+      if (!row || !table.contains(row)) {
+        return;
+      }
+
+      const poId = row.dataset.poId;
+      const url = row.dataset.lineItemsUrl;
+      const detailRow = table.querySelector(
+        'tr.po-line-items-row[data-parent-po-id="' + poId + '"]'
+      );
+      if (!detailRow) {
+        return;
+      }
+
+      const isVisible = detailRow.style.display !== "none";
+      if (isVisible) {
+        // Collapse
+        detailRow.style.display = "none";
+        row.classList.remove("expanded");
+        return;
+      }
+
+      // Expand
+      row.classList.add("expanded");
+      detailRow.style.display = "";
+
+      const tbody = detailRow.querySelector("tbody");
+      const loading = detailRow.querySelector(".line-items-loading");
+
+      if (tbody.dataset.loaded === "1") {
+        // Already built once; just hide the spinner if present
+        if (loading) loading.style.display = "none";
+        return;
+      }
+
+      if (loading) {
+        loading.style.display = "";
+        loading.textContent = "Loading line items…";
+      }
+
+      const cached = lineItemsCache[poId];
+      if (cached) {
+        buildRowsFromItems(tbody, cached);
+        tbody.dataset.loaded = "1";
+        if (loading) loading.style.display = "none";
+        // status from DOM already handled elsewhere if needed
+        return;
+      }
+
+      fetch(url)
+        .then(function (resp) {
+          if (!resp.ok) {
+            throw new Error("Failed to fetch line items");
+          }
+          return resp.json();
+        })
+        .then(function (items) {
+          lineItemsCache[poId] = items;
+          buildRowsFromItems(tbody, items);
+          tbody.dataset.loaded = "1";
+        })
+        .catch(function (err) {
+          if (loading) {
+            loading.style.display = "";
+            loading.textContent = "Failed to load line items.";
+          }
+          console.error("Failed to load line items", err);
+        })
+        .finally(function () {
+          if (loading) {
+            loading.style.display = "none";
+          }
+        });
+    });
+
+    // Handle changes to inputs:
+    // - Received: clamp 0..Qty + auto-set/clear Completed date (and PATCH)
+    // - Expected/Completed: PATCH + recolour row + update PO status
+    table.addEventListener("input", function (evt) {
+      const input = evt.target;
+      if (!input.classList) return;
+
+      const row = input.closest("tr");
+      if (!row) return;
+
+      const isReceived  = input.classList.contains("line-received-input");
+      const isExpected  = input.classList.contains("line-expected-input");
+      const isCompleted = input.classList.contains("line-completed-input");
+
+      if (!isReceived && !isExpected && !isCompleted) {
+        return;
+      }
+
+      const detailRow = row.closest("tr.po-line-items-row");
+
+      if (isReceived) {
+        let val = parseFloat(input.value || "0");
+        const min = parseFloat(input.min || "0");
+        const max = parseFloat(input.max || "0");
+
+        if (!Number.isFinite(val)) val = 0;
+        if (Number.isFinite(min) && val < min) val = min;
+        if (Number.isFinite(max) && val > max) val = max;
+
+        input.value = val;
+
+        const completedInput = row.querySelector(".line-completed-input");
+        if (completedInput && Number.isFinite(max) && max > 0) {
+          if (val === max) {
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, "0");
+            const dd = String(today.getDate()).padStart(2, "0");
+            const completedDateStr = yyyy + "-" + mm + "-" + dd;
+            completedInput.value = completedDateStr;
+            completedInput.classList.add("has-value");
+          } else {
+            completedInput.value = "";
+            completedInput.classList.remove("has-value");
+          }
+        }
+
+        const payload = { qty_received: val };
+        const completedInput2 = row.querySelector(".line-completed-input");
+        if (completedInput2) {
+          payload.exped_completed_date = completedInput2.value || null;
+        }
+        patchLineItem(row, payload);
+      } else if (isExpected) {
+        if (input.value) {
+          input.classList.add("has-value");
+        } else {
+          input.classList.remove("has-value");
+        }
+        patchLineItem(row, {
+          exped_expected_date: input.value || null,
+        });
+      } else if (isCompleted) {
+        if (input.value) {
+          input.classList.add("has-value");
+        } else {
+          input.classList.remove("has-value");
+        }
+        patchLineItem(row, {
+          exped_completed_date: input.value || null,
+        });
+      }
+
+      updateRowStatus(row);
+
+      if (detailRow) {
+        updatePoStatusFromDom(detailRow);
+      }
+    });
+
+    // --- Prefetch line items to compute delivery status for each PO on this page ---
+    const poRows = table.querySelectorAll("tr.po-row");
+    poRows.forEach(function (row) {
+      const poId = row.dataset.poId;
+      const url = row.dataset.lineItemsUrl;
+      if (!poId || !url) return;
+
+      fetch(url)
+        .then(function (resp) {
+          if (!resp.ok) {
+            throw new Error("Failed to prefetch line items");
+          }
+          return resp.json();
+        })
+        .then(function (items) {
+          lineItemsCache[poId] = items;
+          const status = computeStatusFromItems(items);
+          setPoDeliveryStatus(poId, status);
+        })
+        .catch(function (err) {
+          console.error("Failed to prefetch line items for PO", poId, err);
+          setPoDeliveryStatus(poId, "unknown");
+        });
+    });
+  });
+</script>
+
+{% endblock %}

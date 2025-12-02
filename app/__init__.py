@@ -6,6 +6,7 @@ from flask_cors import CORS
 from app.utils.filters import format_date, nl2br, accounting, accounting_number
 from app.routes import email_bp
 from app.blueprints.accounts import accounts_bp
+from app.blueprints.expediting import bp as expediting_bp
 from dotenv import load_dotenv
 
 # Initialize SQLAlchemy
@@ -44,7 +45,7 @@ def create_app():
     app.register_blueprint(main)
     app.register_blueprint(email_bp)
     app.register_blueprint(accounts_bp)
-
+    app.register_blueprint(expediting_bp)
 
     # other setup...
     app.jinja_env.filters["format_date"] = format_date

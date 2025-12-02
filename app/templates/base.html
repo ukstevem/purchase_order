@@ -29,6 +29,9 @@
 
           <a class="nav-link {% if request.endpoint == 'main.create_po' %}active{% endif %}" 
              href="{{ url_for('main.create_po') }}">Create PO</a>
+          
+          <a class="nav-link {% if request.endpoint == 'expediting.expediting' %}active{% endif %}" 
+             href="{{ url_for('expediting.expediting') }}">Expediting</a>
              
           <a class="nav-link {% if request.endpoint == 'accounts.index' %}active{% endif %}" 
              href="{{ url_for('accounts.index') }}">Accounts</a>
