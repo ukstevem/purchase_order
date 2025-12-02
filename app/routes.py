@@ -38,7 +38,22 @@ from app.services.po_email import try_create_po_draft
 from zoneinfo import ZoneInfo
 import re
 
+
 main = Blueprint("main", __name__)
+
+def _to_date(value):
+    """Best-effort conversion of various date formats to `date`."""
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    try:
+        # Supabase usually returns ISO strings, e.g. "2025-11-30T00:00:00+00:00"
+        return date.fromisoformat(str(value)[:10])
+    except Exception:
+        return None
 
 # boolean and string normalisation helper
 
@@ -164,19 +179,52 @@ def po_preview(po_id):
         flash(f"Failed to load PO: {e}", "danger")
         return redirect(url_for("main.po_list"))
 
-    # Compute line totals and footer total
+    # Compute line totals, footer totals, and expediting status for each line
     grand_total = 0
     net_total = 0
     vat_total = 0
+    today = date.today()
+
     for item in po.get("line_items", []):
         qty = item.get("quantity") or 0
         price = item.get("unit_price") or 0.0
+
+        # monetary total
         item["total"] = qty * price
         net_total += item["total"]
-        vat_total = net_total * 0.2
-        grand_total = net_total + vat_total
 
-    return render_template("po_web.html", po=po, md=md, grand_total=grand_total, vat_total=vat_total, net_total=net_total, now=datetime.now())
+        # --- expediting status (per line) ---
+        # column names as per your table: qty_recevied, exped_expected_date, exped_ccompleted_date
+        qty_received   = item.get("qty_recevied") or 0
+        expected_date  = _to_date(item.get("exped_expected_date"))
+        completed_date = _to_date(item.get("exped_ccompleted_date"))
+
+        status = "none"
+
+        # Delivered (green): completed or fully received
+        if completed_date or (qty > 0 and qty_received >= qty):
+            status = "delivered"
+        # Partial (yellow): some received, but not all
+        elif 0 < qty_received < qty:
+            status = "partial"
+        # Late (red): expected date passed and not fully delivered
+        elif expected_date and expected_date < today:
+            status = "late"
+
+        item["exped_status"] = status
+
+    vat_total = net_total * 0.2
+    grand_total = net_total + vat_total
+
+    return render_template(
+        "po_web.html",
+        po=po,
+        md=md,
+        grand_total=grand_total,
+        vat_total=vat_total,
+        net_total=net_total,
+        now=datetime.now(),
+    )
 
 @main.route("/create-po", methods=["GET", "POST"])
 def create_po():
@@ -189,6 +237,14 @@ def create_po():
                 return redirect(url_for("main.create_po"))
 
             metadata, line_items = parse_po_form(request.form)
+
+            # If a delivery date is set on the PO, copy it to each line's exped_expected_date
+            delivery_date = metadata.get("delivery_date")
+            if delivery_date:
+                for li in line_items:
+                    # only set if not already present on the line
+                    li.setdefault("exped_expected_date", delivery_date)
+
 
             # ✅ Your schema: purchase_orders.project_id (TEXT PN) + item_seq
             metadata["project_id"] = (request.form.get("project_id") or "").strip()   # PN goes here

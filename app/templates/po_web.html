@@ -146,7 +146,11 @@
       {% set unit_price = item.get('unit_price') or 0 %}
       {% set line_total = item.get('total') if item.get('total') is not none else (qty * unit_price) %}
       {% set totals.grand_total = totals.grand_total + line_total %}
-      <tr>
+
+      {# expediting status set in po_preview: 'late', 'delivered', 'partial', or 'none' #}
+      {% set status = item.get('exped_status', 'none') %}
+
+      <tr class="po-row-{{ status }}">
         <td class="col-idx center">{{ loop.index }}</td>
         <td class="col-desc">{{ item.get('description', '') | nl2br }}</td>
         <td class="num">{{ "{:,.2f}".format(qty) }}</td>
@@ -156,6 +160,8 @@
       </tr>
     {% endfor %}
   </tbody>
+
+
 
   <tfoot>
     <tr>

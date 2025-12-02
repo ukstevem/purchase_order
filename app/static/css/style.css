@@ -556,3 +556,20 @@ textarea[name="description[]"] {
 .table.pivot .num a.drill-link:hover,
 .table.pivot .num a.drill-link:focus { opacity: 1; }
 */
+
+/* Expediting colours for PO web view */
+.po-web-items tr.po-row-late {
+  background-color: #f8d7da;  /* light red */
+}
+
+.po-web-items tr.po-row-delivered {
+  background-color: #d4edda;  /* light green */
+}
+
+.po-web-items tr.po-row-partial {
+  background-color: #fff3cd;  /* light yellow */
+}
+
+.po-web-items tr.po-row-none {
+  background-color: transparent;
+}
