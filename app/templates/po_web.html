@@ -136,11 +136,16 @@
       <th class="col-total num" style="width:15%;">Total</th>
     </tr>
   </thead>
+
+  {# running total for all line items #}
+  {% set totals = namespace(grand_total=0) %}
+
   <tbody>
     {% for item in po['line_items'] %}
       {% set qty = item.get('quantity') or 0 %}
       {% set unit_price = item.get('unit_price') or 0 %}
       {% set line_total = item.get('total') if item.get('total') is not none else (qty * unit_price) %}
+      {% set totals.grand_total = totals.grand_total + line_total %}
       <tr>
         <td class="col-idx center">{{ loop.index }}</td>
         <td class="col-desc">{{ item.get('description', '') | nl2br }}</td>
@@ -151,6 +156,13 @@
       </tr>
     {% endfor %}
   </tbody>
+
+  <tfoot>
+    <tr>
+      <td colspan="5" class="num" style="text-align: right;"><strong>Total Value</strong></td>
+      <td class="col-total num"><strong>{{ money_cell(totals.grand_total) }}</strong></td>
+    </tr>
+  </tfoot>
 </table>
 
 {% else %}
