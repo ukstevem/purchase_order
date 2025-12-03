@@ -242,8 +242,8 @@ def create_po():
             delivery_date = metadata.get("delivery_date")
             if delivery_date:
                 for li in line_items:
-                    # only set if not already present on the line
-                    li.setdefault("exped_expected_date", delivery_date)
+                    if not li.get("exped_expected_date"):
+                        li["exped_expected_date"] = delivery_date
 
 
             # ✅ Your schema: purchase_orders.project_id (TEXT PN) + item_seq
