@@ -121,6 +121,13 @@
     color: inherit;
   }
 
+  table.line-items-table th:nth-child(2),
+  table.line-items-table td:nth-child(2),
+  table.line-items-table td.description-cell {
+    text-align: left;
+  }
+
+
   /* Row colouring for line items */
   .line-row-complete {
     background-color: #d1e7dd; /* green-ish */
@@ -175,7 +182,74 @@
     cursor: default;
     pointer-events: none;
   }
+
+  .line-items-container {
+    padding: 0.5rem 0.25rem 0.75rem 0.25rem;
+    background-color: #fafafa;
+  }
+
+  table.line-items-table {
+    width: 100%;              /* fill the available width */
+    table-layout: fixed;      /* fixed column layout; no resizing with content */
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  table.line-items-table th,
+  table.line-items-table td {
+    padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid #e1e1e1;
+    text-align: center;       /* default centre for most columns */
+  }
+
+  table.line-items-table th {
+    background: #f0f4f7;
+  }
+
+  /* Fixed widths for non-description columns so only Description flexes */
+  table.line-items-table th:nth-child(1),
+  table.line-items-table td:nth-child(1) {
+    width: 3rem;              /* # */
+  }
+
+  table.line-items-table th:nth-child(3),
+  table.line-items-table td:nth-child(3) {
+    width: 5rem;              /* Qty */
+  }
+
+  table.line-items-table th:nth-child(4),
+  table.line-items-table td:nth-child(4) {
+    width: 6rem;              /* Received */
+  }
+
+  table.line-items-table th:nth-child(5),
+  table.line-items-table td:nth-child(5),
+  table.line-items-table th:nth-child(6),
+  table.line-items-table td:nth-child(6) {
+    width: 7rem;              /* Expected / Completed dates */
+  }
+
+  .description-cell {
+    text-align: left;         /* keep description left-aligned */
+    white-space: normal;      /* allow wrapping */
+    word-break: break-word;   /* break long words if needed */
+    /* no fixed width: this column flexes to fill remaining space */
+  }
+
+  .number-cell {
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .line-items-table input[type="number"],
+  .line-items-table input[type="date"] {
+    font-size: 0.85rem;
+    padding: 0.05rem 0.2rem;
+  }
+
+  /* existing date placeholder + row colour rules stay as they are... */
 </style>
+
 
 {% if po_list and po_list|length > 0 %}
   <div class="expediting-summary">
