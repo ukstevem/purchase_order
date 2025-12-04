@@ -7,10 +7,12 @@
   {"product": "Welding Wire (MAG): Non Alloy and Fine Grain Steels", "standard": "EN ISO 14341", "documentation": "Type 2.2"},
   {"product": "Welding Electrodes (MMA): Non Alloys and Fine Grain Steels", "standard": "EN ISO 2560", "documentation": "Type 2.2"},
   {"product": "Welding Wire (MAG): Stainless Steel", "standard": "EN 10204", "documentation": "Type 3.1"},
+  {"product": "Welding Wire: Aluminium", "standard": "EN 18273", "documentation": "Type 3.1"},  
   {"product": "Welding Gases", "standard": "EN ISO 14175", "documentation": "Type 2.2"},
   {"product": "Steel Painting", "standard": "EN ISO 12944-7", "documentation": "Supplier Report*"},
   {"product": "Steel Galvanising", "standard": "EN ISO 1461", "documentation": "Supplier Report*"},
   {"product": "Thermal Cutting", "standard": "BS EN 1090-2/3834-2", "documentation": "Supplier Report*"},
   {"product": "Design", "standard": "EN 1993 - (All Parts)", "documentation": "Supplier Report*"},
-  {"product": "Stainless Steel Sections, Flat, RSA and Bar", "standard": "EN 10088-3", "documentation": "Type 3.1"}
+  {"product": "Stainless Steel Sections, Flat, RSA and Bar", "standard": "EN 10088-3", "documentation": "Type 3.1"},
+  {"product": "Aluminium Channels, Angles, Flats and Plate", "standard": "EN 485, 515 & 573", "documentation": "Type 3.1"}
 ]
