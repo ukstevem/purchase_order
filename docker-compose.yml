@@ -15,7 +15,7 @@ services:
       SUPABASE_KEY: ${SUPABASE_KEY}
       SECRET_KEY: ${SECRET_KEY}
       FLASK_ENV: ${FLASK_ENV:-production}
-      NETWORK_ARCHIVE_DIR: /mnt/share      # <— add this
+      NETWORK_ARCHIVE_DIR: /mnt/share/Purchase Orders
       SAVE_PDF_ON_DOWNLOAD: "1"
       # FLASK_DEBUG: "0"
       # PREFERRED_URL_SCHEME: http
@@ -31,6 +31,6 @@ services:
     volumes:
       - ./instance:/app/instance
       - ./output:/app/output
-      - "/mnt/po_share/Purchase Orders:/mnt/share:rw"
+      - "/mnt/po_share:/mnt/share:rw"
     restart: unless-stopped
     # If your app binds only on 127.0.0.1, add: command: flask run --host=0.0.0.0 --port=8000
