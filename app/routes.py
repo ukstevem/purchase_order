@@ -238,12 +238,11 @@ def create_po():
 
             metadata, line_items = parse_po_form(request.form)
 
-            # If a delivery date is set on the PO, copy it to each line's exped_expected_date
-            delivery_date = metadata.get("delivery_date")
-            if delivery_date:
-                for li in line_items:
-                    if not li.get("exped_expected_date"):
-                        li["exped_expected_date"] = delivery_date
+            # Capture PO-level delivery date (for header + line items)
+            # Prefer what parse_po_form put into metadata, but fall back to the raw form value.
+            delivery_date = metadata.get("delivery_date") or (request.form.get("delivery_date") or "").strip()
+            if not delivery_date:
+                delivery_date = None  # keep it clean
 
 
             # ✅ Your schema: purchase_orders.project_id (TEXT PN) + item_seq
@@ -306,6 +305,16 @@ def create_po():
             for item in line_items:
                 item["po_id"] = po_id
             insert_line_items(line_items)
+
+            if delivery_date:
+                base, _ = _get_supabase_auth()
+                requests.patch(
+                    f"{base}/rest/v1/po_line_items",
+                    headers=get_headers(),
+                    params={"po_id": f"eq.{po_id}"},
+                    json={"exped_expected_date": delivery_date},
+                    timeout=30,
+                )
 
             flash("Purchase Order created successfully!", "success")
             return redirect(url_for("main.po_preview", po_id=po_id))
