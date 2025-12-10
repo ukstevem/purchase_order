@@ -68,4 +68,12 @@ def parse_po_form(form):
             "active": True
         })
 
+    # Inject delivery date default
+    delivery_date = metadata.get("delivery_date")
+    if delivery_date:
+        for li in line_items:
+            # Don't overwrite a per-line value if you add one later
+            if not li.get("exped_expected_date"):
+                li["exped_expected_date"] = delivery_date
+
     return metadata, line_items
