@@ -98,8 +98,8 @@ def expediting():
         start_index = 0
         end_index = 0
 
-    # ---- Pagination window (max 10 links) ----
-    window = 10
+    # ---- Pagination window (max 50 links) ----
+    window = 50
     half = window // 2
     page_start = max(1, page - half)
     page_end = min(total_pages, page_start + window - 1)
