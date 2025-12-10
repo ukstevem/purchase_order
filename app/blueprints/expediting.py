@@ -21,7 +21,7 @@ from app.supabase_client import (
 
 bp = Blueprint("expediting", __name__)
 
-PO_PAGE_SIZE = 10  # rows per page
+PO_PAGE_SIZE = 50  # rows per page
 
 
 @bp.route("/expediting", methods=["GET"])
