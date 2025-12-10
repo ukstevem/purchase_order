@@ -924,6 +924,99 @@ def po_pdf(po_id):
     response.headers["Content-Disposition"] = f'inline; filename={filename}'
     return response
 
+@main.route("/po/<po_id>/view-pdf")
+def po_view_pdf(po_id):
+    """
+    View-only PDF endpoint.
+
+    - If an archived PDF exists, stream that.
+    - Otherwise generate the PDF and archive it.
+    - Does NOT create an Outlook draft.
+    """
+    import os
+    from .supabase_client import fetch_po_detail
+
+    current_app.logger.info(f"📄 Route hit: PO VIEW PDF for {po_id}")
+
+    # --- Load PO ---
+    try:
+        po = fetch_po_detail(po_id)
+        if not po:
+            return render_template("404.html"), 404
+    except Exception as e:
+        flash(f"Failed to load PO: {e}", "danger")
+        return redirect(url_for("main.po_list"))
+
+    # --- Build filename: <ponumber>-<revision>.pdf (same as po_pdf) ---
+    po_number = str(po.get("po_number") or "UNKNOWN")
+    revision = str(po.get("current_revision") or "NA")
+    filename = f"{int(str(po_number)):06d}-{revision}.pdf"
+
+    # --- Try to serve an existing archived PDF first ---
+    archive_root = (
+        current_app.config.get("NETWORK_ARCHIVE_DIR")
+        or os.environ.get("NETWORK_ARCHIVE_DIR")
+    )
+    pdf_bytes = None
+
+    if archive_root:
+        archive_path = Path(archive_root).joinpath(filename)
+        try:
+            if archive_path.is_file():
+                current_app.logger.info(f"Serving archived PO PDF from {archive_path}")
+                pdf_bytes = archive_path.read_bytes()
+        except Exception as e:
+            current_app.logger.warning(
+                "Failed to read archived PDF %s: %s", archive_path, e
+            )
+
+    # --- If no archive, generate a fresh PDF (same as po_pdf, but no email) ---
+    if pdf_bytes is None:
+        net_total = 0
+        for item in po.get("line_items", []):
+            qty = item.get("quantity") or 0
+            price = item.get("unit_price") or 0.0
+            item["total"] = qty * price
+            net_total += item["total"]
+        vat_total = net_total * 0.2
+        grand_total = net_total + vat_total
+
+        # Embed logo as base64
+        logo_path = Path("app/static/img/PSS_Standard_RGB.png")
+        with open(logo_path, "rb") as img_file:
+            logo_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+
+        certs_table = load_certs_table()
+
+        now = datetime.now()
+        html = render_template(
+            "po_pdf.html",
+            po=po,
+            net_total=net_total,
+            vat_total=vat_total,
+            grand_total=grand_total,
+            now=now,
+            logo_base64=logo_base64,
+            pdf=True,
+            certs_table=certs_table,
+            include_certs_table=True,
+        )
+
+        pdf_bytes = HTML(string=html, base_url=request.root_url).write_pdf(
+            stylesheets=[CSS(filename="app/static/css/pdf_style.css")]
+        )
+
+        # Save an archive copy (we already know filename/location)
+        try:
+            save_pdf_archive(pdf_bytes, relative_dir="", filename=filename)
+        except Exception as e:
+            current_app.logger.warning("Failed to save archive in po_view_pdf: %s", e)
+
+    # --- Return PDF inline ---
+    response = make_response(pdf_bytes)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = f'inline; filename={filename}'
+    return response
 
 # app/email_po.py
 

@@ -2,6 +2,25 @@
 {% block title %}PO Preview{% endblock %}
 {% block content %}
 
+<style>
+  .btn-email-po {
+    background-color: #8b0000; /* dark red */
+    color: #ffffff;
+  }
+  .btn-email-po:hover {
+    background-color: #a00000;
+  }
+
+  .btn-view-po {
+    background-color: #006400; /* dark green */
+    color: #ffffff;
+  }
+  .btn-view-po:hover {
+    background-color: #008000;
+  }
+</style>
+
+
 {# --- Macro for accounting-style money cells: £ left, number right, negatives in parentheses --- #}
 {% macro money_cell(value) -%}
   {% set v = (value if value is not none else 0) %}
@@ -14,8 +33,9 @@
   {% endif %}
 {%- endmacro %}
 
-<div class="noprint" style="margin-bottom: 1em;">
-  <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn" target="_blank">Download PDF</a>
+<div class="noprint" style="margin-bottom: 1em; display: flex; gap: 0.5rem;">
+  <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn btn-email-po" target="_blank">Issue PO</a>
+  <a href="{{ url_for('main.po_view_pdf', po_id=po['id']) }}" class="btn btn-view-po" target="_blank">View PDF</a>
 </div>
 
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1em;">
@@ -177,11 +197,13 @@
 
 <br>
 
-<div class="noprint" style="margin-bottom: 1em; display: flex; justify-content: space-between;">
+<div class="noprint" style="margin-bottom: 1em; display: flex; justify-content: space-between; align-items: center;">
   <a href="{{ url_for('main.edit_po', po_id=po['id']) }}" class="btn">✏️ Edit</a>
-  <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn" target="_blank">Download PDF</a>
+  <div style="display: inline-flex; gap: 0.5rem;">
+    <a href="{{ url_for('main.po_pdf', po_id=po['id']) }}" class="btn btn-email-po" target="_blank">Issue PO</a>
+    <a href="{{ url_for('main.po_view_pdf', po_id=po['id']) }}" class="btn btn-view-po" target="_blank">View PDF</a>
+  </div>
 </div>
-
 
 {% else %}
   <p>PO not found.</p>
