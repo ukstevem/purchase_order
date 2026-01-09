@@ -38,6 +38,55 @@ from app.services.po_email import try_create_po_draft
 from zoneinfo import ZoneInfo
 import re
 
+def _natural_key(s: str):
+    # "M10" after "M2" (natural sort)
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s or "")]
+
+def _line_item_text(item: dict) -> str:
+    # pick a sensible “description” field, regardless of column naming
+    for k in ("description", "item_description", "item_desc", "line_desc", "name", "details", "code"):
+        v = item.get(k)
+        if v:
+            return str(v).strip()
+    return ""
+
+def _to_float(v, default=0.0) -> float:
+    try:
+        if v is None or v == "":
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+def _is_test_cert(text: str) -> bool:
+    t = (text or "").lower()
+    return ("test certificate" in t) or (re.search(r"\btest\s*cert", t) is not None)
+
+def sort_po_line_items(po: dict) -> None:
+    items = po.get("line_items") or []
+    if not isinstance(items, list) or not items:
+        return
+
+    def key(pair):
+        idx, it = pair
+        text = _line_item_text(it)
+        qty = _to_float(it.get("quantity"), 0.0)
+        price = _to_float(it.get("unit_price"), 0.0)
+        total = qty * price
+
+        is_test = _is_test_cert(text)
+        is_zero = (abs(total) < 1e-9)  # treat 0.00 as zero
+
+        # priority group to top: test cert OR zero value
+        priority_group = 0 if (is_test or is_zero) else 1
+        # within priority group, put test cert first (then other zero-value lines)
+        test_first = 0 if is_test else 1
+
+        return (priority_group, test_first, _natural_key(text), idx)
+
+    po["line_items"] = [it for _, it in sorted(enumerate(items), key=key)]
+
+
 
 main = Blueprint("main", __name__)
 
@@ -173,6 +222,7 @@ def po_preview(po_id):
         po = fetch_po_detail(po_id)
         md_list = po.get("po_metadata") or []
         md = md_list[0] if isinstance(md_list, list) and md_list else {}
+        sort_po_line_items(po)
         if not po:
             return render_template("404.html"), 404
     except Exception as e:
@@ -838,6 +888,7 @@ def po_pdf(po_id):
 
     try:
         po = fetch_po_detail(po_id)
+        sort_po_line_items(po)
         if not po:
             return render_template("404.html"), 404
     except Exception as e:
@@ -928,6 +979,7 @@ def po_view_pdf(po_id):
     # --- Load PO ---
     try:
         po = fetch_po_detail(po_id)
+        sort_po_line_items(po)
         if not po:
             return render_template("404.html"), 404
     except Exception as e:
